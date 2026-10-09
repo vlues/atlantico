@@ -24,7 +24,7 @@ jobs:
         with:
           path: ~/.platformio
           key: pio-${{ hashFiles('firmware/platformio.ini') }}
-      - run: pip install platformio==6.2.0
+      - run: pip install platformio==6.2.0 esptool==5.5.0
       - run: pio run -d firmware
       - run: bash firmware/merge.sh firmware/out
       - uses: actions/upload-artifact@v4
