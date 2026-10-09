@@ -23,7 +23,7 @@ export interface Conditions {
   scenario?: string;
 }
 
-const CACHE_KEY = 'conditions:live';
+const CACHE_KEY = 'conditions:live:v2'; // bump when the Conditions shape changes
 const MAX_AGE_MS = 20 * 60 * 1000;
 
 export async function getConditions(env: Env, scenario?: string | null): Promise<Conditions> {
