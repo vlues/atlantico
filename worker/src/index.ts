@@ -11,6 +11,7 @@ import { dailyCheck, telegram } from './check';
 import { firmwareCheck, firmwareImage } from './firmware';
 import { tourInfo, tourStop, playStop, STOPS } from './tour';
 import * as music from './music';
+import * as screens from './screens';
 // @ts-ignore — shared plain-JS module
 import { edition, STYLES } from '../../web/lib/art.js';
 
@@ -81,6 +82,9 @@ on('DELETE', '/api/visitors/:id', (r, env, _c, m) => deleteVisitor(m[1], r, env)
 
 // ── Devices ──────────────────────────────────────────────────────────────────
 on('POST', '/api/pair', (r, env) => pair(r, env));
+on('POST', '/api/screen/hello', (r, env) => screens.hello(r, env));
+on('GET', '/api/screen/hello', (_r, env, _c, _m, url) => screens.waiting(env, url));
+on('POST', '/api/screen/beat', (r, env) => screens.beat(r, env));
 on('POST', '/api/device/report', (r, env) => report(r, env));
 on('GET', '/api/panel/poll', (r, env) => panelPoll(r, env));
 on('GET', '/api/device/firmware', (r, env, _c, _m, url) => firmwareCheck(r, env, url));
@@ -116,6 +120,7 @@ on('PUT', '/api/plants/:id', async (r, env, _c, m) => {
   return json({ ok: true, rules });
 }, 'owner');
 on('POST', '/api/pairing', (r, env) => createPairing(r, env), 'owner');
+on('POST', '/api/screen/claim', (r, env) => screens.claim(r, env), 'owner');
 on('GET', '/api/pairing/:code', (_r, env, _c, m) => pairingStatus(m[1], env), 'owner');
 on('PATCH', '/api/devices/:id', (r, env, _c, m) => updateDevice(m[1], r, env), 'owner');
 on('DELETE', '/api/devices/:id', (_r, env, _c, m) => removeDevice(m[1], env), 'owner');

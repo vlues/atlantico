@@ -4,9 +4,10 @@ import { json } from './http';
 import { now, randomId, pairingCode, sha256, body, deviceFromRequest, logAlert, type DeviceRow } from './util';
 import { listPlants, decideWatering, recordReading, recordWatering } from './plants';
 import { telegram } from './check';
+import { screenChanged } from './screens';
 
 // How often each kind checks in; offline after 3 missed check-ins.
-export const EXPECTED_S: Record<string, number> = { panel: 900, plant: 1200, lights: 86400 };
+export const EXPECTED_S: Record<string, number> = { panel: 900, plant: 1200, lights: 86400, screen: 300 };
 
 export async function createPairing(req: Request, env: Env) {
   const b = await body<{ type: string; name?: string; config?: Record<string, unknown> }>(req);
@@ -106,6 +107,7 @@ export async function updateDevice(id: string, req: Request, env: Env) {
   if (!d) return json({ error: 'not found' }, 404);
   const config = { ...JSON.parse(d.config), ...(b.config ?? {}) };
   await env.DB.prepare('UPDATE devices SET name = ?, config = ? WHERE id = ?').bind(b.name ?? d.name, JSON.stringify(config), id).run();
+  if (d.type === 'screen') await screenChanged(env); // screens pick up new settings within seconds
   return json({ ok: true });
 }
 
@@ -120,7 +122,8 @@ export async function removeDevice(id: string, env: Env) {
 /** Cron: tell the owner once when a real device stops checking in. */
 export async function offlineAlerts(env: Env) {
   for (const d of await listDevices(env)) {
-    if (d.simulated || d.type === 'lights') continue;
+    // TVs and tablets get switched off; only alert for devices that are meant to stay on.
+    if (d.simulated || d.type === 'lights' || d.type === 'screen') continue;
     const key = `offline-alerted:${d.id}`;
     if (!d.online && !(await env.STATE.get(key))) {
       const msg = `${d.name} has been offline since ${d.last_seen ? new Date(d.last_seen).toISOString().slice(0, 16).replace('T', ' ') + ' UTC' : 'pairing'}.`;

@@ -1,7 +1,8 @@
 import { api, API, ownerToken, toast, esc } from './api.js';
 
 const $ = (id) => document.getElementById(id);
-if (!ownerToken.get()) location.href = 'control';
+// Not signed in yet: sign in on the control page, then come straight back (with any screen code).
+if (!ownerToken.get()) location.href = `control?next=${encodeURIComponent(`add${location.search}`)}`;
 
 // Firmware builds published next to this page by the GitHub Action (see firmware/README).
 const BOARDS = {
@@ -26,7 +27,15 @@ const KITS = [
     ['USB-C 5 V chargers (100–240 V) and USB-C data cables', 'One per device. A data cable for setup; the panel can run on its battery.', '≈ $8–12 each', 'USB C charger 5V 2A'],
     ['Large picture-hanging strips', 'Hangs the panel without drilling.', '≈ $10–15', 'Command picture hanging strips large'],
   ] },
-  { title: 'Colour instead (optional)', note: 'Swap the panel above for six-colour e-ink: guests who are here show in colour.', items: [
+  { title: 'Screens · colour and motion', note: 'Pick one: a matte tablet looks most like paper; an art TV is the big statement. Nothing here needs a screw.', items: [
+    ['TCL NXTPAPER 14 (or NXTPAPER 11) matte tablet', 'Best for Atlántico: paper-like, no glare. 760 g (11″: 500 g).', '≈ $170–350', 'TCL NXTPAPER 14 tablet'],
+    ['Slim case for it + Command Large picture-hanging strips (4 pairs)', 'Strips on the case, not the tablet. Rated 16 lb (≈ 7 kg) per 4 pairs. Smooth painted walls only.', '≈ $15 + 10', 'Command large picture hanging strips'],
+    ['…or a tabletop easel tablet stand', 'For gotelé or wallpaper, or a shelf or sideboard. Holds it upright, no wall at all.', '≈ $20–35', 'aluminium tablet stand easel 14 inch'],
+    ['Long USB-C cable (3 m, flat, white or black)', 'Keeps it powered; run it down behind furniture.', '≈ $10', 'USB C cable 3m flat'],
+    ['Hisense CanvasTV 55″ (or Samsung The Frame / TCL NXTFRAME)', 'The big statement. About 18 kg: never on adhesive strips.', '≈ $900–1,500', 'Hisense CanvasTV 55'],
+    ['Floor easel TV stand, 43–65″, rated 35 kg+', 'Holds an art TV with no wall fixing. VIVO, ECOTINY or KONIC tripods.', '≈ $100–120', 'tripod easel TV stand 43-65 inch'],
+  ] },
+  { title: 'Colour e-ink instead (optional)', note: 'Swap the panel above for six-colour e-ink: guests who are here show in colour.', items: [
     ['Waveshare 7.3″ e-Paper (E) Spectra 6', 'The colour display.', '≈ $80', 'Waveshare 7.3 Spectra 6 e-paper'],
     ['Seeed XIAO ePaper driver board + XIAO ESP32-S3 Plus', 'Plugs onto the display ribbon. No soldering.', '≈ $40–55', 'Seeed XIAO ePaper driver board ESP32-S3 Plus'],
   ] },
@@ -69,9 +78,11 @@ $('types').addEventListener('click', async (e) => {
   if (!b) return;
   type = b.dataset.type;
   document.querySelectorAll('#types button').forEach((x) => x.classList.toggle('on', x === b));
-  $('esp').hidden = type === 'lights';
+  $('esp').hidden = type === 'lights' || type === 'screen';
   $('lights').hidden = type !== 'lights';
-  if (type !== 'lights') await setupEsp();
+  $('screen').hidden = type !== 'screen';
+  if (type === 'screen') setupScreen();
+  else if (type !== 'lights') await setupEsp();
 });
 
 async function setupEsp() {
@@ -191,6 +202,42 @@ async function waitPaired(c) {
     await new Promise((r) => setTimeout(r, 3000));
   }
   $('pairstate').textContent = 'Still waiting. Check the Wi-Fi password, then press Pair again.';
+}
+
+// ── Screens ───────────────────────────────────────────────────────────────────
+function setupScreen() {
+  const url = new URL('wall', location.href).href;
+  $('wallurl').textContent = url.replace(/^https?:\/\//, '');
+  if (window.qrcode && !$('wallqr').innerHTML) {
+    const qr = window.qrcode(0, 'M');
+    qr.addData(url);
+    qr.make();
+    $('wallqr').innerHTML = qr.createSvgTag({ cellSize: 3, margin: 0, scalable: true });
+  }
+}
+$('skind').addEventListener('change', () => { $('soled').checked = $('skind').value === 'oled'; });
+$('scode').addEventListener('input', () => { $('scode').value = $('scode').value.replace(/\D/g, ''); if ($('scode').value.length === 4) $('sname').focus(); });
+$('sadd').addEventListener('click', async () => {
+  $('sadd').disabled = true;
+  try {
+    const r = await api('/api/screen/claim', { method: 'POST', owner: true, body: {
+      code: $('scode').value, name: $('sname').value || undefined,
+      config: { kind: $('skind').value, night: $('snight').value, oled: $('soled').checked },
+    } });
+    $('sstate').innerHTML = `Added <b>${esc(r.name)}</b>. The screen says “Conectada” in a few seconds. <a href="control">Back to control</a>`;
+    toast('Screen added');
+  } catch (err) { $('sstate').textContent = err.message; }
+  $('sadd').disabled = false;
+});
+// Arrived from the QR on a screen: everything is filled in but the name.
+{
+  const code = new URLSearchParams(location.search).get('screen');
+  if (code && /^\d{4}$/.test(code)) {
+    document.querySelector('[data-type="screen"]').click();
+    $('scode').value = code;
+    $('s-scode').scrollIntoView({ behavior: 'smooth', block: 'center' });
+    $('sname').focus();
+  }
 }
 
 // ── Lights ────────────────────────────────────────────────────────────────────

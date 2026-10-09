@@ -22,6 +22,9 @@ async function unlock() {
     data = await api('/api/overview', { owner: true });
     // Signed in with a passcode kept from before sessions existed: swap it for a session.
     if (!ownerToken.get().startsWith('s1.')) ownerToken.set((await session(ownerToken.get())).token);
+    // Sent here to sign in from another page (e.g. Add device, from a screen's QR): go back to it.
+    const next = new URLSearchParams(location.search).get('next');
+    if (next && /^add(\?[\w=&%-]*)?$/.test(next)) { location.href = next; return true; }
     $('login').style.display = 'none';
     $('app').style.display = 'block';
     $('app').classList.add('fade-in');
@@ -253,20 +256,30 @@ $('d-check').addEventListener('click', async (e) => {
 $('d-clear').addEventListener('click', () => act('/api/demo', { action: 'clear-demo-visitors' }, 'Demo visitors removed'));
 
 function renderDevices() {
+  if ($('devices').contains(document.activeElement)) return; // don't redraw under a choice being made
   const on = data.devices.filter((d) => d.online).length;
   $('devsummary').textContent = `${on} of ${data.devices.length} online`;
   $('devices').innerHTML = data.devices.map((d) => {
     const st = d.status;
-    const extra = [d.type, d.config?.size, st?.battery != null ? `battery ${st.battery}%` : null, st?.rssi ? `${st.rssi} dBm` : null, st?.fw ? `fw ${st.fw}` : null].filter(Boolean).join(' · ');
+    const extra = [d.type === 'screen' ? `screen${d.config?.kind ? ` · ${d.config.kind}` : ''}` : d.type, d.config?.size ?? st?.size, st?.battery != null ? `battery ${st.battery}%` : null, st?.rssi ? `${st.rssi} dBm` : null, st?.fw ? `fw ${st.fw}` : null].filter(Boolean).join(' · ');
     return `<div>
       <span class="dot ${d.online ? 'on' : ''}" title="${d.online ? 'online' : 'offline'}"></span>
       <div class="grow"><div>${esc(d.name)} ${d.simulated ? '<span class="tag">simulated</span>' : ''}</div>
         <div class="small muted">${esc(extra)} · ${d.online ? 'online' : 'offline'}${d.lastSeenS != null ? `, seen ${ago(Date.now() - d.lastSeenS * 1000)}` : ''}</div></div>
+      ${d.type === 'screen' ? `<select data-night="${d.id}" title="At night (00:30–07:00)">${[['dim', 'dims at night'], ['off', 'dark at night'], ['on', 'always on']].map(([v, l]) => `<option value="${v}" ${d.config.night === v ? 'selected' : ''}>${l}</option>`).join('')}</select>
+        <label class="small muted" style="display:flex;gap:6px;align-items:center"><input type="checkbox" data-oled="${d.id}" ${d.config.oled ? 'checked' : ''}> OLED care</label>` : ''}
       ${d.simulated && data.demo.simulate ? `<button class="btn small quiet" data-offline="${d.id}">${data.demo.offline.includes(d.id) ? 'Bring online' : 'Simulate outage'}</button>` : ''}
       ${!d.simulated && d.id !== 'govee' ? `<button class="btn small quiet" data-remove="${d.id}">Unpair</button>` : ''}
     </div>`;
   }).join('');
 }
+$('devices').addEventListener('change', async (e) => {
+  const id = e.target.dataset.night ?? e.target.dataset.oled;
+  if (!id) return;
+  const config = e.target.dataset.night ? { night: e.target.value } : { oled: e.target.checked };
+  try { await api(`/api/devices/${id}`, { method: 'PATCH', owner: true, body: { config } }); toast('Saved · the screen updates in a few seconds'); }
+  catch (err) { toast(err.message); }
+});
 $('devices').addEventListener('click', async (e) => {
   const off = e.target.dataset.offline, rm = e.target.dataset.remove;
   if (off) act('/api/demo', { action: 'offline', value: off }, 'Updated');
@@ -394,6 +407,6 @@ function refreshInk() {
 document.querySelectorAll('[data-view]').forEach((b) => b.addEventListener('click', () => {
   view = b.dataset.view;
   document.querySelectorAll('[data-view]').forEach((x) => x.classList.toggle('on', x === b));
-  $('preview').innerHTML = view === 'web' ? '<iframe src="wall" title="Wall piece"></iframe>' : '<img alt="E-ink panel image">';
+  $('preview').innerHTML = view === 'web' ? '<iframe src="wall?preview" title="Wall piece"></iframe>' : '<img alt="E-ink panel image">';
   if (view !== 'web') refreshInk();
 }));

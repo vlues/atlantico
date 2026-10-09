@@ -80,7 +80,7 @@ export async function deviceFromRequest(req: Request, env: Env): Promise<DeviceR
 }
 
 export interface DeviceRow {
-  id: string; type: 'panel' | 'plant' | 'lights'; name: string; token_hash: string | null;
+  id: string; type: 'panel' | 'plant' | 'lights' | 'screen'; name: string; token_hash: string | null;
   simulated: number; config: string; last_seen: number | null; created_at: number;
 }
 

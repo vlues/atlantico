@@ -7,6 +7,7 @@ import { sunPosition } from '../lib/sun.js';
 import { moonPosition } from '../lib/moon.js';
 import { paint, arrival, revealAt, tourOverlay, farewellOverlay, musicOverlay } from './paint.js';
 import { enableSound, wakeSound, soundWanted, arrivalSound, stopSound } from './sound.js';
+import { screen } from './screen.js';
 
 const API = window.ATLANTICO?.api ?? '';
 const params = new URLSearchParams(location.search);
@@ -37,7 +38,7 @@ async function poll() {
   try {
     const r = await fetch(`${API}/api/wall/version`, { cache: 'no-store' });
     const v = r.ok ? await r.text() : null;
-    if (v && v !== version) { version = v; await refresh(); }
+    if (v && v !== version) { version = v; await refresh(); display.changed(); }
   } catch { /* offline: try again shortly */ }
 }
 
@@ -127,6 +128,10 @@ function frame(now) {
     if (bye?.key !== `${fw.id}:${fw.at}`) { bye = { key: `${fw.id}:${fw.at}`, start: t }; stopSound('end'); }
     farewellOverlay(ctx, comp, fw, (t - bye.start) / 1000);
   }
+  // Night: dim (or go dark) after midnight, unless something is happening in the room.
+  const dim = display.night(t, !!(playing || touring || singing != null || (fw && fw.until > t)));
+  if (dim > 0) { ctx.save(); ctx.globalAlpha = dim; ctx.fillStyle = '#000'; ctx.fillRect(0, 0, canvas.width, canvas.height); ctx.restore(); }
+  display.shift(t);
   if (note && t < note.until) {
     ctx.save();
     ctx.globalAlpha = Math.min(1, (note.until - t) / 600);
@@ -156,6 +161,7 @@ canvas.addEventListener('click', async () => {
   note = { text: on ? 'sonido · sound on' : 'silencio · sound off', until: Date.now() + 2500 };
 });
 
+const display = screen({ api: API, canvas });
 addEventListener('resize', resize);
 resize();
 await refresh();

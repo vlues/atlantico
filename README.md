@@ -161,6 +161,42 @@ If Wi-Fi drops, the panel keeps showing the last image. E-paper needs no power t
 - A failed or interrupted download leaves the old firmware running.
 - Builds are numbered by the GitHub Actions run that made them. The control page shows each device's version.
 
+### Screen (TV, tablet or monitor)
+
+This is the full-colour, moving version of the wall. Nothing is flashed.
+
+1. On the screen, open `…/atlantico/wall`. Scan the QR on **Add device → Screen** with a tablet, or type the address into a TV's browser.
+2. A small card in its corner shows a **4-digit code** and a QR code.
+3. Scan that QR with your phone and press **Add screen**, or type the code on Add device. The card changes to *Conectada*.
+
+From then on the screen:
+- checks in every five minutes and shows in **Devices** (screens that are switched off never raise offline alerts);
+- keeps the display awake;
+- **dims or goes dark from 00:30 to 07:00**, except during arrivals, the tour and guests' songs;
+- with **OLED care** on, drifts the picture a few pixels now and then so the captions can't burn in.
+
+Change the night setting and OLED care per screen in **Devices**; the screen picks it up within seconds.
+
+**What looks best:**
+
+| | Pick | Why | Holds it, no screws |
+|---|---|---|---|
+| Best for Atlántico | **TCL NXTPAPER 14** (≈ 760 g) or **NXTPAPER 11** (≈ 500 g), about $170–350 | A matte, paper-like screen: no reflections, and the light palettes read like print. | A slim case plus **4 pairs of Command Large picture-hanging strips**. They're rated 16 lb (≈ 7 kg) for four pairs, about ten times the tablet. Or a **tabletop easel stand** on a shelf. |
+| The big statement | **Hisense CanvasTV** (best value), **Samsung The Frame** (most polished), **TCL NXTFRAME** | A matte art TV at 55″ and up. Atlántico runs in its web browser, not its Art Mode. | A **floor easel stand** rated 35 kg or more for 43–65″ (VIVO, ECOTINY or KONIC, about $100), or Samsung's Studio Stand. A 55″ CanvasTV weighs about 18 kg, so **never use adhesive**. |
+| Deepest night sky | Any **OLED** tablet or TV | True black, so only the lines and stars glow. | As above, by weight. Turn on OLED care. |
+| Already have one | Any iPad, tablet, TV or laptop | It works today. Glossy screens reflect; a matte screen protector helps. | A stand, or strips for a light tablet. |
+
+**Walls:**
+- Adhesive strips need **smooth, painted walls**. Don't use them on **gotelé** (the textured plaster in many Spanish flats), wallpaper, brick, or paint less than a week old. Use a stand there.
+- Put the strips on a case or frame, never on the tablet itself.
+- Keep any load well under the rating.
+- Floor easels: stand them against a wall, out of the way, and skip anti-tip straps that need a screw.
+
+**Keeping it on:**
+- **iPad:** Add to Home Screen, then use Guided Access and set Auto-Lock to Never.
+- **Android:** use **Fully Kiosk Browser** (Start URL, Keep screen on, Launch on boot).
+- **Smart TV:** use its browser, and turn off Auto Power Off, the sleep timer and the screen saver.
+
 ### Plant node
 
 These steps are the same as for the panel. The difference is that you choose **which plant** the node waters.
@@ -226,7 +262,8 @@ All parts below are USB-powered, renter-friendly and need no drilling. Prices ar
 |---|---|---|
 | Wall panel (B/W) | Seeed Studio **XIAO 7.5″ ePaper Panel** (ESP32-C3, 800×480, USB-C, battery included) | 70–85 |
 | *or* wall panel (colour) | Waveshare **7.3″ e-Paper (E) Spectra 6** panel + Seeed **XIAO ePaper driver board** + **XIAO ESP32-S3 Plus** | 120–140 |
-| Hanging | Command picture-hanging strips (large) | 10–15 |
+| Hanging | Command picture-hanging strips, large: 16 lb (≈ 7 kg) per 4 pairs, smooth painted walls only (not gotelé or wallpaper). The panel is far lighter. | 10–15 |
+| *or* screen (colour, motion) | **TCL NXTPAPER 14** matte tablet + slim case, or a matte art TV on a floor easel stand. See [Screen](#screen-tv-tablet-or-monitor). | 170–350 |
 | Plant node ×4 | Seeed **XIAO ESP32-C3** (3-pack, plus one more) | 25 + 9 |
 | | Capacitive soil moisture sensor v2.0 (5-pack) | 8–10 |
 | | DS18B20 waterproof temperature probe (5-pack) | 10–12 |

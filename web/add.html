@@ -22,7 +22,19 @@
     .shop label a { font-size: 11px; color: var(--muted); margin-right: 8px; }
     .shop input:checked ~ span { text-decoration: line-through; color: var(--muted); }
     .types { display: grid; gap: 1px; background: var(--line); border: 1px solid var(--line); }
-    @media (min-width: 640px) { .types { grid-template-columns: repeat(3, 1fr); } }
+    @media (min-width: 640px) { .types { grid-template-columns: repeat(2, 1fr); } }
+    .picks { display: grid; gap: 1px; background: var(--line); border: 1px solid var(--line); margin: 14px 0; }
+    .picks > div { background: var(--bg); padding: 18px 20px; }
+    .picks h4 { font: italic 300 22px var(--serif); margin: 0 0 2px; }
+    .picks .best { color: var(--warn); font-size: 11px; letter-spacing: .16em; text-transform: uppercase; }
+    .picks p { margin: 6px 0 0; color: var(--muted); font-size: 13px; line-height: 1.6; }
+    .picks p b { color: var(--fg); font-weight: 400; }
+    .tips summary { margin-top: 10px; }
+    .tips ol { margin: 10px 0 0; padding-left: 1.2em; line-height: 1.8; font-size: 14px; color: var(--muted); }
+    .wallurl { font: 300 18px var(--serif); user-select: all; word-break: break-all; }
+    .qrbox { width: 132px; height: 132px; background: #f2f0eb; padding: 8px; }
+    .qrbox svg { width: 100%; height: 100%; display: block; }
+    #scode { font: 300 30px var(--serif); letter-spacing: .3em; width: 7.5em; text-align: center; }
     .types button { background: var(--bg); border: 0; color: var(--fg); padding: 26px 20px; text-align: left; cursor: pointer; transition: background .5s var(--ease); }
     .types button:hover { background: var(--bg-raised); }
     .types button.on { background: var(--fg); color: var(--bg); }
@@ -70,6 +82,63 @@
       <button data-type="panel"><h3>Wall panel</h3><small>E-ink frame showing Atlántico. ESP32 + e-paper.</small></button>
       <button data-type="plant"><h3>Plant node</h3><small>Soil moisture, temperature, reservoir and a small pump.</small></button>
       <button data-type="lights"><h3>Lights</h3><small>Govee bulbs. Paste an API key, pick bulbs. No flashing.</small></button>
+      <button data-type="screen"><h3>Screen</h3><small>A TV, tablet or monitor showing the live wall in colour and motion. No flashing.</small></button>
+    </div>
+
+    <div id="screen" hidden>
+      <div class="step live">
+        <span class="n">2</span>
+        <div>
+          <h3>What looks best, and what holds it (no screws)</h3>
+          <div class="picks">
+            <div><span class="best">Best for Atlántico</span><h4>A matte paper-like tablet</h4>
+              <p><b>TCL NXTPAPER 14</b> (14.3″, about 760 g) or <b>NXTPAPER 11</b> (about 500 g). The matte screen doesn't reflect, so by day the light palettes read like printed paper; at night the dark sky glows softly. Full colour and motion, around $170–350.</p>
+              <p><b>Holds it:</b> a slim case with <b>4 pairs of Command Large picture-hanging strips</b> (rated 16 lb ≈ 7 kg for four pairs, so about ten times the weight), or a <b>tabletop easel stand</b> on a shelf or sideboard. Strips need a smooth painted wall: not <i>gotelé</i> (the textured plaster common in Spanish flats), wallpaper or paint less than a week old. On those, use the stand.</p></div>
+            <div><span class="best">The big statement</span><h4>A matte art TV</h4>
+              <p><b>Hisense CanvasTV</b> (best value, free art library), <b>Samsung The Frame</b> (most polished) or <b>TCL NXTFRAME</b> (frame in the box). Matte, like a framed print, 55″ and up. Atlántico runs in the TV's browser, not its Art Mode.</p>
+              <p><b>Holds it:</b> a 55″ CanvasTV is about 18 kg, far too heavy for any adhesive. Use a <b>floor easel stand</b> rated 35 kg or more for 43–65″ (VIVO, ECOTINY or KONIC tripods, about $100), or Samsung's Studio Stand for The Frame. Keep it against a wall, away from where people walk; skip any anti-tip strap that needs a screw.</p></div>
+            <div><span class="best">Deepest night sky</span><h4>An OLED screen</h4>
+              <p>True black: at night only the lines and stars glow. Any OLED iPad, tablet or TV. Turn on <b>OLED care</b> below; it moves the picture a few pixels now and then so the captions can't burn in.</p></div>
+            <div><span class="best">Already have one</span><h4>Any iPad, tablet, TV or old laptop</h4>
+              <p>It works today. A glossy screen shows reflections; a matte screen protector (Paperlike or similar) fixes most of that on a tablet.</p></div>
+          </div>
+        </div>
+      </div>
+      <div class="step live">
+        <span class="n">3</span>
+        <div>
+          <h3>On the screen, open the wall</h3>
+          <div class="row" style="align-items:flex-start;gap:20px">
+            <div class="qrbox" id="wallqr"></div>
+            <div style="flex:1;min-width:220px">
+              <p class="wallurl" id="wallurl"></p>
+              <p>Scan the code with the tablet's camera, or type the address into the TV's browser. A small card with a <b>4-digit code</b> appears in its corner.</p>
+            </div>
+          </div>
+          <details class="tips"><summary>Make it stay on, full screen</summary>
+            <ol>
+              <li><b>iPad:</b> Share › Add to Home Screen, open it from there, then Settings › Accessibility › Guided Access (triple-click to start). Settings › Display › Auto-Lock › Never.</li>
+              <li><b>Android tablet (NXTPAPER):</b> install <b>Fully Kiosk Browser</b>, set the Start URL to the address above, and turn on "Keep screen on" and "Launch on boot". Or use Chrome's Add to Home Screen.</li>
+              <li><b>Smart TV:</b> open the address in its web browser. Turn off Auto Power Off, Sleep timer and screen saver in the TV's settings.</li>
+              <li><b>Fire TV or Chromecast stick:</b> install a browser (Silk, TV Bro or Fully Kiosk) and open the address.</li>
+            </ol>
+          </details>
+        </div>
+      </div>
+      <div class="step live" id="s-scode">
+        <span class="n">4</span>
+        <div>
+          <h3>Type the code it shows</h3>
+          <div class="opts">
+            <label class="field">Code<input type="text" id="scode" inputmode="numeric" maxlength="4" placeholder="····" autocomplete="off"></label>
+            <label class="field">Name<input type="text" id="sname" maxlength="40" placeholder="Living room"></label>
+            <label class="field">It is<select id="skind"><option value="tablet">a matte tablet</option><option value="arttv">an art TV</option><option value="oled">an OLED screen</option><option value="tv">a TV</option><option value="other">something else</option></select></label>
+            <label class="field">At night (00:30–07:00)<select id="snight"><option value="dim">Dim</option><option value="off">Dark</option><option value="on">Stay as it is</option></select></label>
+            <label class="field" style="flex-direction:row;align-items:center;gap:10px;display:flex"><input type="checkbox" id="soled"> OLED care</label>
+          </div>
+          <div class="row" style="margin-top:14px"><button class="btn" id="sadd">Add screen</button><span class="small muted" id="sstate">Arrivals, the tour and guests' songs always light it up, even at night.</span></div>
+        </div>
+      </div>
     </div>
 
     <div id="esp" hidden>
@@ -130,6 +199,7 @@
   </div>
 
   <script src="config.js"></script>
+  <script src="vendor/qrcode-generator-1.4.4.js"></script>
   <script type="module" src="js/add.js"></script>
 </body>
 </html>
