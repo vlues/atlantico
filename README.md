@@ -16,7 +16,8 @@ A quiet smart-apartment system for a flat in Fuentebravía (El Puerto de Santa M
     - Consecutive days never share a style or a palette.
   - **Day and night.** The wall follows the real sky: paper by day, night after sunset.
     - By day the sun hides the stars, as in life. Guests who are here are **sails on the bay** instead, heeling with the real wind, and a few gulls drift across.
-    - At dusk the sails go in as the stars come out.
+    - At dusk each boat becomes its star: the sail comes down, a light shows at the masthead, and it climbs into the sky to the guest's place with their name. At dawn the star comes back down to its boat and the sail goes up. The welcome words say whichever one is on the wall (*tu vela* by day, *tu estrella* by night).
+    - In the Demo, changing the time of day glides there instead of jumping, slowly through dusk and dawn. There is a *dusk* preset for the moment the lights are halfway up.
     - A daytime arrival is a wake crossing the bay and a sail being hoisted; a night arrival is a shooting star.
   - **Every guest is their own.**
     - Boats come in five kinds (sloop, catamaran, lateen *falucho*, schooner, gaff cutter), each with its own pennant. The mainsail changes each visit: stripes, their visit number, an emblem, or plain.
@@ -64,7 +65,7 @@ A quiet smart-apartment system for a flat in Fuentebravía (El Puerto de Santa M
     - When a guest's song comes on, the wall shows *La canción de Ana* (and whose is next), their star pulses, and the lamps by the wall breathe once. The guest's phone says it's theirs, and vibrates on Android.
     - Each guest can have up to three songs waiting.
   - **The first-arrival tour.** After checking in, the guest's phone tells the story of the flat, one stop per screen: the sea, their star, the day's drawing, the real sky, the plants and the light.
-    - As each stop scrolls into view, the wall shows it too. The sea gets callouts, their star pulses, all five styles pass by, and the moon is circled.
+    - As each stop scrolls into view, the wall shows it too. The sea gets callouts, their star pulses, all seven styles pass by, and the moon is circled.
     - The lamps near what's being described brighten while the rest dim. For the light stop, the whole room goes from noon to dusk.
     - Sound is opt-in, with one tap: surf and soft chimes on the phone, and an arrival chime on the wall once someone has tapped it.
     - The lamps return to the scene on their own about 30 seconds after the last stop.

@@ -470,6 +470,10 @@ export function compose(c, o = {}) {
   const sailsA = o.print ? (alt > -1 ? 1 : 0) : clamp((alt + 1.5) / 4.5, 0, 1);
   const starsA = o.print ? (alt > -1 ? 0 : 1) : clamp((-1 - alt) / 5, 0, 1);
   const byDay = sailsA > starsA;
+  // Dusk turns each boat into its star: the sail comes down, a light gathers at the masthead and
+  // climbs into the sky to the guest's place (dawn plays it backwards: the star comes down to its
+  // boat and the sail goes up). 0 under sail … 1 a star at home; on e-ink it is one or the other.
+  const rise = o.print ? (alt > -1 ? 0 : 1) : clamp((3 - alt) / 9, 0, 1);
   const live = !o.print;
   const heroes = new Map((o.heroes ?? (o.hero != null ? [{ id: o.hero, reveal: o.reveal ?? 1 }] : [])).map((h) => [h.id, h]));
   const departing = new Map((o.departing ?? []).map((d) => [d.id, d]));
@@ -548,7 +552,8 @@ export function compose(c, o = {}) {
     const dep = !here ? departing.get(v.id) : null;
     const name = v.name ?? dep?.name ?? null;
     if (hero && hz.e != null && hz.e < 0) continue; // a later member of a group, not yet on its way
-    if (starsA > 0) {
+    const lifting = live && here && !hero && !dep && rise > 0 && rise < 1;
+    if (starsA > 0 || lifting) {
       const home = starHome(h);
       const hidden = (sunMark && Math.hypot(home.x - sunMark.x, home.y - sunMark.y) < sunMark.r * 2.5) || (moonMark && Math.hypot(home.x - moonMark.x, home.y - moonMark.y) < moonMark.r * 2.2);
       if (!hidden) {
@@ -558,8 +563,25 @@ export function compose(c, o = {}) {
           const k = ease(dep.p);
           P = v.gone ? { x: P.x, y: P.y + S * 0.05 * k } : { x: P.x + (home.x - P.x) * k, y: P.y + (home.y - P.y) * k };
         }
+        let lift = null;
+        if (lifting) {
+          // From the masthead (a lantern while the sail comes down), up and over to its place.
+          const b = boatAt(h), z = S * (0.034 + 0.07 * b.sd);
+          const m = { x: b.x, y: waterY(b.sd, b.x) - z * 0.7 }, to = P;
+          const c = { x: m.x + (to.x - m.x) * 0.1, y: to.y + (m.y - to.y) * 0.2 }; // straight up first, then leaning over
+          const at = (u) => ({ x: (1 - u) * (1 - u) * m.x + 2 * (1 - u) * u * c.x + u * u * to.x, y: (1 - u) * (1 - u) * m.y + 2 * (1 - u) * u * c.y + u * u * to.y });
+          const u = ease(clamp((rise - 0.4) / 0.6, 0, 1));
+          const trail = [];
+          if (u > 0.005 && u < 0.995) for (let q = 0; q < 4; q++) {
+            const pts = [];
+            for (let k = 0; k <= 4; k++) { const p = at(Math.max(0, u - 0.2 + 0.05 * q + 0.0125 * k)); pts.push(p.x, p.y); }
+            trail.push({ pts, alpha: 0.1 + 0.12 * q });
+          }
+          lift = { a: Math.max(starsA, ease(clamp((rise - 0.12) / 0.28, 0, 1))), grow: 0.3 + 0.7 * u, arrived: clamp((u - 0.85) / 0.15, 0, 1), trail };
+          P = at(u);
+        }
         if (hero && !byDay) heroAt.push({ id: v.id, x: P.x, y: P.y, home, kind: 'star' });
-        if (!(hero && (hz.reveal ?? 1) < 0.02)) stars.push({ x: P.x, y: P.y, hx: home.x, hy: home.y, h, v: { ...v, name }, hero, reveal: hz?.reveal ?? 1, here, dep: dep ? dep.p : null, gone: !!v.gone });
+        if (!(hero && (hz.reveal ?? 1) < 0.02)) stars.push({ x: P.x, y: P.y, hx: home.x, hy: home.y, h, v: { ...v, name }, hero, reveal: hz?.reveal ?? 1, here, dep: dep ? dep.p : null, gone: !!v.gone, lift });
       }
     }
     if (sailsA > 0 && !v.gone && !here && !(dep && dep.p < 1)) {
@@ -571,6 +593,7 @@ export function compose(c, o = {}) {
     if (sailsA > 0 && (here || dep)) {
       let { x, sd, fwd, speed } = boatAt(h, dep ? t - (dep.age ?? 0) : t);
       let hoist = hero ? 1 - Math.pow(1 - (hz.reveal ?? 1), 3) : 1, sink = 0;
+      if (!hero && !dep) { hoist = 1 - ease(clamp(rise / 0.35, 0, 1)); speed *= hoist; } // dusk: the sail comes down, the boat lies still
       if (hero && hz.e != null && live) {
         // Arriving: sails in from one side with a bare mast, stops at its place, hoists its sail.
         const home = boatHome(h), from = home.x - fw * 0.3 > mx ? 1 : -1, p = ease(clamp(hz.e / 3.4, 0, 1));
@@ -599,7 +622,7 @@ export function compose(c, o = {}) {
   const textW = (str, size) => [...str].length * size * 0.62; // close enough for Cormorant
   const texts = [];
   let block = null;
-  const wt = o.welcome ? welcomeText(o.welcome, c) : null;
+  const wt = o.welcome ? welcomeText(o.welcome, c, byDay) : null;
   let clearing = null;
   if (wt) {
     // Spanish first, English small beneath, sized to fit whatever the day's horizon. One guest's
@@ -659,7 +682,7 @@ export function compose(c, o = {}) {
     return pts;
   };
   for (const d of dots) {
-    const A = starsA;
+    const A = d.lift ? d.lift.a : starsA;
     const visits = d.v.visits ?? 1;
     const regular = 1 + 0.22 * Math.min(4, Math.max(0, visits - 1));
     const settle = d.dep != null ? ease(d.dep) : d.here ? 0 : 1; // 0 shining … 1 a quiet star
@@ -677,9 +700,11 @@ export function compose(c, o = {}) {
     const lowness = clamp(1 - (horizon - d.y) / Math.max(1, horizon - H * 0.1), 0, 1);
     const pace = (0.8 + 1.6 * hash(d.h, 53, 7)) * (1 + 1.5 * wN), depth = (0.08 + 0.1 * hash(d.h, 54, 7)) * (1 + 1.2 * wN + 0.8 * lowness);
     const tw = o.print ? 1 : 1 + depth * Math.sin(t * pace + (d.h % 628) / 100);
-    const grow = 1 - Math.pow(1 - d.reveal, 3);
-    const L = (d.hero ? S * 0.05 * grow : S * 0.027) * tw * (d.hero ? 1 : regular * 0.85) * (0.4 + 0.6 * (1 - settle));
-    const d0 = S * (d.hero ? 0.009 : 0.006), core = S * (d.hero ? 0.0062 : 0.0045);
+    const grow = 1 - Math.pow(1 - d.reveal, 3), lg = d.lift ? d.lift.grow : 1;
+    const L = (d.hero ? S * 0.05 * grow : S * 0.027) * tw * (d.hero ? 1 : regular * 0.85) * (0.4 + 0.6 * (1 - settle)) * lg;
+    const d0 = S * (d.hero ? 0.009 : 0.006) * lg, core = S * (d.hero ? 0.0062 : 0.0045) * (0.5 + 0.5 * lg);
+    // Climbing from its boat at dusk: a fading thread of light behind it.
+    if (d.lift) for (const tr of d.lift.trail) sparks.push({ pts: tr.pts, alpha: tr.alpha * glow, weight: 1.1, accent: 'here' });
     const thin = o.print ? 1 : 0.8;
     const spin = (live ? t * 0.03 * (hash(d.h, 55, 7) - 0.5) : 0) + hash(d.h, 56, 7) * 0.3;
     const at = (k, n) => [Math.cos(spin + (k * TAU) / n), Math.sin(spin + (k * TAU) / n)];
@@ -717,7 +742,7 @@ export function compose(c, o = {}) {
     if (visits >= 6) circles.push({ x: d.x, y: d.y, r: L * 0.95, fill: false, alpha: 0.22 * glow, accent: 'here' });
     if (kind !== 'double') circles.push({ x: d.x, y: d.y, r: core, fill: true, alpha: glow, accent: 'here' });
     if (kind === 'sparkle') circles.push({ x: d.x, y: d.y, r: S * (d.hero ? 0.017 + 0.004 * Math.sin(t * 0.9) * (live ? 1 : 0) : 0.0115), fill: false, alpha: (d.hero ? 0.55 : 0.4) * glow, accent: 'here' });
-    if (d.v.name && !o.welcome && !byDay) { d.fade = 1 - settle; labels.push(d); } // during a welcome, the arrivals have the stage
+    if (d.v.name && !o.welcome && !byDay) { d.fade = (1 - settle) * (d.lift ? 0.5 + 0.5 * d.lift.arrived : 1); labels.push(d); } // during a welcome, the arrivals have the stage
   }
 
   // Boats: each guest has their own kind (sloop, catamaran, lateen falucho, schooner, gaff cutter) and
@@ -997,19 +1022,26 @@ function ago(ms, es) {
   return n(Math.round(d / 365), es ? 'hace un año' : 'a year ago', es ? 'hace # años' : '# years ago');
 }
 
+/** Whether guests show as sails (true) or stars at this sun altitude (where the two cross at dusk). */
+export const sailing = (altitude) => altitude > -1.25;
+
 /**
- * The personal line under a guest's name: which visit this is and how long it has been,
- * or, the first time, that their star is new and which wind brought them.
+ * The personal line under a guest's name: which visit this is and how long it has been, or, the
+ * first time, that their sail (by day) or star (by night) is new and which wind brought them.
  */
-export function welcomeLine(w, c = {}, lang = 'es') {
+export function welcomeLine(w, c = {}, lang = 'es', day = false) {
   const es = lang === 'es';
   const n = w.visits ?? 1;
   const wn = windName(c.windSpeed ?? 0, c.windDirection ?? 0);
   const wind = !wn ? null : wn === 'calma' ? (es ? 'mar en calma' : 'a calm sea') : es ? `llegas con ${wn}` : `arriving with the ${wn}`;
-  if (n <= 1) return [es ? 'tu estrella, desde hoy' : 'your star, from today', wind].filter(Boolean).join(' · ');
+  if (n <= 1) {
+    const yours = day ? (es ? 'tu vela en la bahía, desde hoy' : 'your sail on the bay, from today') : es ? 'tu estrella, desde hoy' : 'your star, from today';
+    return [yours, wind].filter(Boolean).join(' · ');
+  }
   const ord = ORD[es ? 'es' : 'en'][n - 1];
   const visit = ord ? `${ord} ${es ? 'visita' : 'visit'}` : es ? `visita ${n}` : `visit ${n}`;
-  const since = w.since ? (es ? `la anterior, ${ago(w.since, true)}` : `the last one ${ago(w.since, false)}`) : wind;
+  const back = day ? (es ? 'tu vela vuelve a la bahía' : 'your sail is back on the bay') : es ? 'tu estrella vuelve a brillar' : 'your star shines again';
+  const since = w.since ? (es ? `la anterior, ${ago(w.since, true)}` : `the last one ${ago(w.since, false)}`) : back;
   return [visit, since].filter(Boolean).join(' · ');
 }
 
@@ -1021,23 +1053,25 @@ const COUNT = {
 
 /**
  * Everything the welcome says, in Spanish with English beneath. One guest: their name and their
- * own line. Several arriving together: all their names, and how many stars are new or returning.
+ * own line. Several arriving together: all their names, and how many sails (by day) or stars (by
+ * night) are new or returning.
  */
-export function welcomeText(w, c = {}) {
+export function welcomeText(w, c = {}, day = false) {
   const group = w.group?.length > 1 ? w.group : null;
   if (!group) {
     const back = (w.visits ?? 1) > 1 || w.greeting === 'Hola de nuevo';
     return {
       greeting: w.greeting ?? 'Bienvenido', greetingEn: back ? 'Welcome back' : 'Welcome',
-      title: w.name, line: welcomeLine(w, c, 'es'), lineEn: welcomeLine(w, c, 'en'),
+      title: w.name, line: welcomeLine(w, c, 'es', day), lineEn: welcomeLine(w, c, 'en', day),
     };
   }
   const names = group.map((g) => g.name);
   const title = names.length <= 5 ? names.join(' · ') : `${names.slice(0, 4).join(' · ')} · +${names.length - 4}`;
   const fresh = group.filter((g) => (g.visits ?? 1) <= 1).length, back = group.length - fresh;
   const n = (k, lang) => (k <= 10 ? COUNT[lang][k - 1] : String(k));
-  const es = [fresh && `${n(fresh, 'es')} ${fresh === 1 ? 'estrella nueva' : 'estrellas nuevas'}`, back && `${n(back, 'es')} ${back === 1 ? 'que vuelve' : 'que vuelven'}`];
-  const en = [fresh && `${n(fresh, 'en')} new ${fresh === 1 ? 'star' : 'stars'}`, back && `${n(back, 'en')} returning`];
+  const [one, many, oneEn] = day ? ['vela nueva', 'velas nuevas', 'sail'] : ['estrella nueva', 'estrellas nuevas', 'star'];
+  const es = [fresh && `${n(fresh, 'es')} ${fresh === 1 ? one : many}`, back && `${n(back, 'es')} ${back === 1 ? 'que vuelve' : 'que vuelven'}`];
+  const en = [fresh && `${n(fresh, 'en')} new ${oneEn}${fresh === 1 ? '' : 's'}`, back && `${n(back, 'en')} returning`];
   return {
     greeting: 'Bienvenidos', greetingEn: 'Welcome, everyone', title,
     line: es.filter(Boolean).join(' · '), lineEn: en.filter(Boolean).join(' · '),

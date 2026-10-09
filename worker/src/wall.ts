@@ -56,6 +56,7 @@ export const SUN_PRESETS: Record<string, { altitude: number; azimuth: number }> 
   noon: { altitude: 48, azimuth: 180 },
   'golden hour': { altitude: 6, azimuth: 250 },
   sunset: { altitude: 0.5, azimuth: 258 },
+  dusk: { altitude: -3.5, azimuth: 262 },
   night: { altitude: -25, azimuth: 320 },
 };
 

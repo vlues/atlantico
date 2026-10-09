@@ -77,8 +77,8 @@
         <div><button class="btn" type="submit">Entrar</button></div>
         <div class="err" id="err" role="status"></div>
       </form>
-      <p class="meta" style="margin-top:40px">Solo guardamos tu nombre de pila. Mientras estás aquí aparece junto a tu estrella en la pared, y este teléfono te recordará la próxima vez. Puedes borrarlo cuando quieras.<br>
-        Only your first name is kept. While you're here it shows beside your star on the wall, and this phone will remember you next time. You can delete it any time.</p>
+      <p class="meta" style="margin-top:40px">Solo guardamos tu nombre de pila. Mientras estás aquí aparece junto a tu vela (de día) o tu estrella (de noche) en la pared, y este teléfono te recordará la próxima vez. Puedes borrarlo cuando quieras.<br>
+        Only your first name is kept. While you're here it shows beside your sail (by day) or your star (by night) on the wall, and this phone will remember you next time. You can delete it any time.</p>
     </div>
 
     <!-- This phone remembers them: checking in on its own -->
@@ -93,7 +93,7 @@
     <div class="card" id="bye">
       <p class="eyebrow">Hasta pronto · See you soon</p>
       <h2 id="byename" style="font-size:clamp(36px,10vw,52px);font-style:italic"></h2>
-      <p class="meta" style="margin-top:24px">Tu estrella se queda en la pared, esperándote.<br>Your star stays on the wall, waiting for you.</p>
+      <p class="meta" style="margin-top:24px">Tu vela seguirá cruzando la bahía y tu estrella se queda en el cielo, esperándote.<br>Your sail will keep crossing the bay, and your star stays in the sky, waiting for you.</p>
       <p style="margin-top:40px"><button class="btn quiet small" id="stay" type="button">Me quedo · I'm staying</button></p>
     </div>
 
@@ -152,7 +152,7 @@
   <script src="vendor/qrcode-generator-1.4.4.js"></script>
   <script type="module">
     import { api, drift } from './js/api.js';
-    import { compose, welcomeLine, hashString, compass, windName, edition, clock } from './lib/art.js';
+    import { compose, welcomeLine, sailing, hashString, compass, windName, edition, clock } from './lib/art.js';
     import { sunPosition, sunTimes } from './lib/sun.js';
     import { STOPS, COPY } from './lib/tour.js';
     import { enableSound, wakeSound, soundWanted, stopSound } from './js/sound.js';
@@ -248,15 +248,18 @@
       let state = null;
       try { state = await api('/api/wall'); } catch { /* draw without the others */ }
       const c = state?.conditions ?? {};
+      const lat = state?.lat ?? 36.5986, lon = state?.lon ?? -6.2797;
+      // The sky as the wall shows it (the Demo panel can set the time of day).
+      const sunNow = () => (state?.sunOverride ? state.sun : sunPosition(new Date(), lat, lon));
+      const day = sailing(sunNow().altitude);
       $('line').innerHTML = '';
-      $('line').append(welcomeLine(v, c, 'es'), Object.assign(document.createElement('span'), { className: 'en', textContent: welcomeLine(v, c, 'en') }));
+      $('line').append(welcomeLine(v, c, 'es', day), Object.assign(document.createElement('span'), { className: 'en', textContent: welcomeLine(v, c, 'en', day) }));
       const visitors = state?.visitors?.some((s) => s.id === v.id) ? state.visitors : [...(state?.visitors ?? []), { id: v.id, visits: v.visits, here: true, name: v.name }];
       const canvas = $('sky');
       $('skyfig').hidden = false;
       const ctx = canvas.getContext('2d');
       const reduce = matchMedia('(prefers-reduced-motion: reduce)').matches;
       const start = performance.now() - (reduce ? 8000 : 0);
-      const lat = state?.lat ?? 36.5986, lon = state?.lon ?? -6.2797;
       let shownDay = null;
       const draw = (now) => {
         const dpr = Math.min(2, devicePixelRatio || 1);
@@ -264,8 +267,9 @@
         if (canvas.width !== w) { canvas.width = w; canvas.height = h; }
         const e = (now - start) / 1000;
         // Composed taller than shown, so the sky gets most of the frame and the sea just shows.
-        const comp = compose({ ...c, sun: sunPosition(new Date(), lat, lon), moon: moonPosition(new Date(), lat, lon) }, {
-          width: w, height: Math.round(w * 1.15), dark: sunPosition(new Date(), lat, lon).altitude < -2, captions: false, date: Date.now(), style: state?.style,
+        const sun = sunNow();
+        const comp = compose({ ...c, sun, moon: moonPosition(new Date(), lat, lon) }, {
+          width: w, height: Math.round(w * 1.15), dark: sun.altitude < -2, captions: false, date: Date.now(), style: state?.style,
           visitors, heroes: [{ id: v.id, reveal: revealAt(e), e }], time: Date.now() / 1000, lat, lon,
         });
         paint(ctx, comp, 1, null);
@@ -348,7 +352,7 @@
       const wn = windName(c.windSpeed ?? 0, c.windDirection ?? 0);
       const data = {
         sea: c.waveHeight != null && `olas de ${c.waveHeight.toFixed(1).replace(".", ",")} m cada ${Math.round(c.wavePeriod)} s · viento ${Math.round(c.windSpeed)} km/h del ${compass(c.windDirection)}${wn && wn !== 'calma' ? ` (${wn})` : ''}${c.tideTrend ? ` · la marea ${c.tideTrend === 'rising' ? 'sube' : 'baja'}` : ''}`,
-        star: welcomeLine(v, c, 'es'),
+        star: welcomeLine(v, c, 'es', sailing((state?.sunOverride ? state.sun : sunPosition(new Date(), state?.lat ?? 36.5986, state?.lon ?? -6.2797)).altitude)),
         edition: `hoy: ${ed.label} · paleta ${ed.palette.name}`,
         sky: [m && m.fraction > 0.02 ? `${m.name}, ${Math.round(m.fraction * 100)} %` : null, c.seaTemp != null ? `el agua a ${Math.round(c.seaTemp)} °C` : null,
           t ? `${t.type === 'high' ? 'pleamar' : 'bajamar'} a las ${clock(Date.parse(t.at))}` : null].filter(Boolean).join(' · '),

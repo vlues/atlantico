@@ -63,9 +63,37 @@ function resize() {
   canvas.height = Math.round(innerHeight * dpr);
 }
 
+// The sun: the real one, or the Demo panel's time of day. When the Demo changes it the screen
+// travels there instead of jumping, unhurried through dusk and dawn (where the boats become stars
+// and back) and quick through the rest of the sky.
+let sunShown = null, sunMove = null;
+const BAND = [-6.5, 3.5], SLOW = 1.3, FAST = 0.07; // seconds per degree, inside and outside the band
+function sunFor(s, now) {
+  const want = s.sunOverride ? s.sun : s.simulate && params.get('sun') ? JSON.parse(params.get('sun')) : sunPosition(new Date(now), s.lat, s.lon);
+  const key = s.sunOverride ?? 'live';
+  if (sunMove?.key !== key) {
+    const from = sunShown;
+    let legs = [];
+    if (from) {
+      const a = from.altitude, b = want.altitude, dir = Math.sign(b - a) || 1;
+      const stops = [a, ...BAND.filter((x) => (x - a) * dir > 0 && (b - x) * dir > 0).sort((p, q) => (p - q) * dir), b];
+      legs = stops.slice(1).map((to, i) => { const at = stops[i], mid = (at + to) / 2; return { at, to, secs: Math.abs(to - at) * (mid > BAND[0] && mid < BAND[1] ? SLOW : FAST) }; });
+    }
+    sunMove = { key, from, at: now, legs, total: legs.reduce((n, l) => n + l.secs, 0) };
+  }
+  const { from, legs, total } = sunMove;
+  const k = total > 0 ? Math.min(1, (now - sunMove.at) / 1000 / total) : 1;
+  if (k >= 1) return (sunShown = want);
+  let left = k * k * (3 - 2 * k) * total, altitude = want.altitude;
+  for (const l of legs) { if (left <= l.secs) { altitude = l.at + (l.to - l.at) * (l.secs ? left / l.secs : 1); break; } left -= l.secs; }
+  const f = Math.abs(want.altitude - from.altitude) > 0.01 ? (altitude - from.altitude) / (want.altitude - from.altitude) : k;
+  const turn = ((want.azimuth - from.azimuth + 540) % 360) - 180;
+  return (sunShown = { altitude, azimuth: (from.azimuth + turn * f + 360) % 360 });
+}
+
 let moon = { at: 0 };
 function conditions(s, now) {
-  const sun = s.simulate && params.get('sun') ? JSON.parse(params.get('sun')) : sunPosition(new Date(now), s.lat, s.lon);
+  const sun = sunFor(s, now);
   if (now - moon.at > 60000) moon = { at: now, pos: moonPosition(new Date(now), s.lat, s.lon) };
   return { ...s.conditions, sun, moon: moon.pos };
 }
@@ -130,7 +158,7 @@ function draw() {
   const singing = m && song && !playing && !touring ? (t - song.start) / 1000 : null;
   const hero = touring?.tour.stop === 'star' ? touring.tour.id : singing != null && singing < 25 ? m.by.id : null;
 
-  const dark = params.get('mode') === 'light' ? false : params.get('mode') === 'dark' ? true : state.dark;
+  const dark = params.get('mode') === 'light' ? false : params.get('mode') === 'dark' ? true : sunFor(state, t).altitude < -2;
   const view = { dark, welcome, e, style, hero, starts: playing?.starts };
   const key = `${dark}|${playing ? `${playing.start}:${playing.starts.size}` : ''}|${touring?.key ?? ''}|${style ?? ''}`;
   if (shown.key !== key) shown = { key, view, at: t, fade: style ? 1200 : 3000, prev: shown.key ? shown.view : null };

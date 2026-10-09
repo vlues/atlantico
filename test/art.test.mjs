@@ -263,3 +263,21 @@ test('guests wander and come back; leaving guests exit (sail off by day, settle 
   const hoisted = composeAny({ ...calm, ...day }, { width: 800, height: 480, style: 'lineas', visitors, heroes: [{ id: 'ana', reveal: 1, e: 6 }], welcome: { id: 'ana', name: 'Ana' } });
   assert.ok(hoisted.shapes.some((sh) => sh.accent === 'here'), 'sail up at its place');
 });
+
+test('at dusk each boat lowers its sail and its light climbs into the sky to become its star', () => {
+  const visitors = [{ id: 'ana', here: true, name: 'Ana' }];
+  const at = (altitude) => composeAny({ ...calm, sun: { altitude, azimuth: 262 } }, { width: 1600, height: 1000, style: 'lineas', visitors, time: 50 });
+  const star = (comp) => comp.circles.find((x) => x.accent === 'here' && x.fill && x.alpha > 0.05);
+  const label = (comp) => comp.texts.find((x) => x.role === 'label' && x.text === 'Ana')?.alpha ?? 0;
+  assert.ok(at(20).shapes.some((sh) => sh.accent === 'here') && !star(at(20)), 'under sail by day');
+  const lowered = at(-0.6);
+  assert.ok(!lowered.shapes.some((sh) => sh.accent === 'here'), 'the sail is down');
+  assert.ok(star(lowered), 'a light at the masthead');
+  const climbing = at(-3), home = at(-20);
+  assert.ok(star(climbing).y > star(home).y + 20 && star(climbing).y < star(lowered).y - 20, 'on its way up');
+  assert.ok(label(climbing) > 0 && label(climbing) < label(home), 'the name rides up with it, brightening when it arrives');
+  // And the words follow what is on the wall.
+  assert.equal(welcomeLine({ visits: 1 }, {}, 'es', true), 'tu vela en la bahía, desde hoy · mar en calma');
+  assert.equal(welcomeLine({ visits: 3 }, {}, 'en', false), 'third visit · your star shines again');
+  assert.equal(welcomeText({ group: [{ name: 'A', visits: 1 }, { name: 'B', visits: 1 }] }, {}, true).lineEn, 'two new sails');
+});

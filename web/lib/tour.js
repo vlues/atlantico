@@ -11,13 +11,13 @@ export const COPY = {
   },
   star: {
     es: 'Tu estrella', en: 'Your star',
-    bodyEs: 'Cada persona que ha pasado por esta casa tiene una estrella en el cielo de la pared, siempre en el mismo sitio. La tuya brilla en dorado mientras estás aquí. De día, cuando el sol esconde las estrellas, eres una vela en la bahía.',
-    bodyEn: "Everyone who has stayed here has a star in the wall's sky, always in the same place. Yours shines gold while you're here. By day, when the sun hides the stars, you are a sail on the bay.",
+    bodyEs: 'Cada persona que ha pasado por esta casa tiene una estrella en el cielo de la pared, siempre en el mismo sitio. La tuya brilla en dorado mientras estás aquí. De día, cuando el sol esconde las estrellas, eres una vela en la bahía; al anochecer arría la vela y su luz sube al cielo.',
+    bodyEn: "Everyone who has stayed here has a star in the wall's sky, always in the same place. Yours shines gold while you're here. By day, when the sun hides the stars, you are a sail on the bay; at dusk it lowers its sail and its light climbs into the sky.",
   },
   edition: {
     es: 'Un dibujo nuevo cada día', en: 'A new drawing every day',
-    bodyEs: 'A medianoche cambian el estilo, los colores y la altura del horizonte. Ningún día se repite. Mira la pared: ahora pasan los cinco estilos.',
-    bodyEn: 'At midnight the style, the colours and the horizon change. No two days are the same. Look at the wall: all five styles are passing now.',
+    bodyEs: 'A medianoche cambian el estilo, los colores y la altura del horizonte. Ningún día se repite. Mira la pared: ahora pasan los siete estilos.',
+    bodyEn: 'At midnight the style, the colours and the horizon change. No two days are the same. Look at the wall: all seven styles are passing now.',
   },
   sky: {
     es: 'El cielo de verdad', en: 'The real sky',
