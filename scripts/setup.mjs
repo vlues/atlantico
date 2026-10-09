@@ -11,7 +11,7 @@ const WRANGLER = `${root}node_modules/.bin/wrangler`;
 const STATE_FILE = `${root}.atlantico.local.json`;
 const state = existsSync(STATE_FILE) ? JSON.parse(readFileSync(STATE_FILE, 'utf8')) : {};
 const saveState = () => writeFileSync(STATE_FILE, JSON.stringify(state, null, 2));
-const rl = createInterface({ input: stdin, output: stdout });
+let rl = createInterface({ input: stdin, output: stdout });
 
 const say = (s = '') => console.log(s);
 const step = (s) => say(`\n— ${s}`);
@@ -24,15 +24,31 @@ async function ask(q, def = '') {
   const a = (await rl.question(`  ${q}${def ? ` [${def}]` : ''}: `)).trim();
   return a || def;
 }
-// Typed secrets show as dots.
-let muted = false;
-rl._writeToOutput = (s) => stdout.write(muted ? s.replace(/[^\r\n]/g, '•') : s);
-async function askSecret(q) {
-  stdout.write(`  ${q}: `);
-  muted = true;
-  const a = await rl.question('');
-  muted = false;
-  return a.trim();
+// Typed secrets show as dots. Readline is closed while we read the raw keystrokes ourselves.
+function askSecret(q) {
+  rl.close();
+  return new Promise((resolve) => {
+    stdout.write(`  ${q}: `);
+    let s = '';
+    if (stdin.isTTY) stdin.setRawMode(true);
+    stdin.resume();
+    const done = () => {
+      stdin.off('data', on);
+      if (stdin.isTTY) stdin.setRawMode(false);
+      stdout.write('\n');
+      rl = createInterface({ input: stdin, output: stdout });
+      resolve(s.trim());
+    };
+    const on = (buf) => {
+      for (const ch of buf.toString('utf8')) {
+        if (ch === '\r' || ch === '\n') return done();
+        if (ch === '\u0003') { stdout.write('\n'); process.exit(130); }
+        if (ch === '\u007f' || ch === '\b') { if (s) { s = s.slice(0, -1); stdout.write('\b \b'); } continue; }
+        if (ch >= ' ') { s += ch; stdout.write('•'); }
+      }
+    };
+    stdin.on('data', on);
+  });
 }
 async function yes(q, def = true) {
   const a = (await ask(`${q} (${def ? 'Y/n' : 'y/N'})`)).toLowerCase();
