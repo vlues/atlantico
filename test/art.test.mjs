@@ -206,11 +206,12 @@ test('several guests arriving together get one welcome: all their names, new and
 
 test('names float around their stars, each in its own way, and still on e-ink', () => {
   const visitors = [{ id: 'ana', here: true, name: 'Ana' }, { id: 'tom', here: true, name: 'Tom' }];
-  const at = (time, print = false) => compose(night, { width: 800, height: 480, visitors, time, print }).texts.filter((t) => t.role === 'label');
-  const [a1, a2] = [at(0), at(20)];
-  assert.ok(a1.every((t) => t.arc), 'names are set on a curve');
-  assert.ok(Math.abs(a1[0].arc.a - a2[0].arc.a) > 0.01, 'they sway over time');
-  assert.notEqual((a2[0].arc.a - a1[0].arc.a).toFixed(3), (a2[1].arc.a - a1[1].arc.a).toFixed(3), 'each at its own pace');
+  const at = (time, print = false) => compose(night, { width: 1600, height: 1000, visitors, time, print }).texts.filter((t) => t.role === 'label');
+  const [a1, a2] = [at(0), at(6)];
+  assert.ok(a1.length === 2 && a1.every((t) => t.arc), 'names are set on a curve');
+  const turn = (n) => a2.find((t) => t.text === n).arc.a - a1.find((t) => t.text === n).arc.a;
+  assert.ok(Math.abs(turn('Ana')) > 0.001, 'they sway over time');
+  assert.notEqual(turn('Ana').toFixed(4), turn('Tom').toFixed(4), 'each at its own pace');
   assert.deepEqual(at(0, true).map((t) => t.arc.a), at(99, true).map((t) => t.arc.a), 'still on e-ink');
 });
 
@@ -236,4 +237,29 @@ test('weather: cloud kinds follow cover; rain falls from clouds and rings the wa
   const at = (cloudCover, precipitation = 0) => composeAny({ ...calm, cloudCover, precipitation }, { width: 800, height: 480, style: 'lineas' }).lines.length;
   const clear = at(0), wisps = at(20), cumulus = at(60), grey = at(95), wet = at(95, 3);
   assert.ok(clear < wisps && wisps < cumulus && cumulus < grey && grey < wet, `${clear} ${wisps} ${cumulus} ${grey} ${wet}`);
+});
+
+test('guests wander and come back; leaving guests exit (sail off by day, settle by night)', () => {
+  const visitors = [{ id: 'ana', here: true, name: 'Ana' }];
+  const at = (time, c = { sun: { altitude: -20, azimuth: 300 } }, extra = {}) => composeAny({ ...calm, ...c }, { width: 800, height: 480, style: 'lineas', visitors, time, ...extra });
+  const star = (comp) => comp.circles.find((x) => x.accent === 'here' && x.fill);
+  assert.notDeepEqual([star(at(0)).x, star(at(0)).y], [star(at(20)).x, star(at(20)).y], 'stars wander');
+  const home = composeAny({ ...calm, sun: { altitude: -20, azimuth: 300 } }, { width: 800, height: 480, print: true, style: 'lineas', visitors });
+  assert.ok(Math.hypot(star(at(20)).x - star(home).x, star(at(20)).y - star(home).y) < 800 * 0.03, 'but stay near their place');
+  // Night departure: the sparkle settles into a quiet star at home.
+  const gone = [{ id: 'ana' }];
+  const end = composeAny({ ...calm, sun: { altitude: -20, azimuth: 300 } }, { width: 800, height: 480, style: 'lineas', visitors: gone, time: 20, departing: [{ id: 'ana', name: 'Ana', p: 1 }] });
+  assert.ok(!end.circles.some((x) => x.accent === 'here' && x.alpha > 0.01), 'no sparkle left');
+  assert.ok(end.circles.some((x) => x.accent === 'visitor' && x.alpha > 0.5), 'a quiet star stays');
+  // Day departure: the boat heads for the horizon and is gone at the end.
+  const day = { sun: { altitude: 30, azimuth: 200 } };
+  const mid = composeAny({ ...calm, ...day }, { width: 800, height: 480, style: 'lineas', visitors: gone, time: 20, departing: [{ id: 'ana', name: 'Ana', p: 0.4 }] });
+  assert.ok(mid.shapes.some((sh) => sh.accent === 'here'), 'still sailing away');
+  const out = composeAny({ ...calm, ...day }, { width: 800, height: 480, style: 'lineas', visitors: gone, time: 20, departing: [{ id: 'ana', name: 'Ana', p: 1 }] });
+  assert.ok(!out.shapes.some((sh) => sh.accent === 'here'), 'over the horizon');
+  // Day arrival: sails in from the side, then hoists.
+  const sailing = composeAny({ ...calm, ...day }, { width: 800, height: 480, style: 'lineas', visitors, heroes: [{ id: 'ana', reveal: 0, e: 1 }], welcome: { id: 'ana', name: 'Ana' } });
+  assert.ok(!sailing.shapes.some((sh) => sh.accent === 'here'), 'bare mast on the way in');
+  const hoisted = composeAny({ ...calm, ...day }, { width: 800, height: 480, style: 'lineas', visitors, heroes: [{ id: 'ana', reveal: 1, e: 6 }], welcome: { id: 'ana', name: 'Ana' } });
+  assert.ok(hoisted.shapes.some((sh) => sh.accent === 'here'), 'sail up at its place');
 });

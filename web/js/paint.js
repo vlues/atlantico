@@ -145,7 +145,7 @@ const rnd = (seed, k) => {
  */
 export function arrival(ctx, comp, e, seed = 0, target = comp.hero) {
   const h = target;
-  if (!h || e == null || e > LAND_S + 3.4) return;
+  if (!h || e == null || e > (h.kind === 'sail' ? 7 : LAND_S + 3.4)) return;
   const W = comp.width, H = comp.height, S = Math.min(W, H);
   const gold = (comp.palette ?? (comp.dark ? PALETTE.dark : PALETTE.light)).here;
   const sw = Math.max(0.7, S / 1100);
@@ -153,24 +153,10 @@ export function arrival(ctx, comp, e, seed = 0, target = comp.hero) {
   ctx.strokeStyle = ctx.fillStyle = ctx.shadowColor = gold;
 
   if (h.kind === 'sail') {
-    // By day: a wake crosses the bay to where their sail will be, then rings open on the water.
-    const dir = rnd(seed, 1) < 0.5 ? 1 : -1, y = h.water, z = h.size;
-    const p = clamp01((e - 0.2) / (LAND_S - 0.2)), u = 1 - (1 - p) * (1 - p);
-    if (e < LAND_S + 0.6) {
-      const x0 = h.x - dir * W * (0.14 + 0.1 * rnd(seed, 2)), bx = x0 + (h.x - x0) * u;
-      const len = Math.abs(bx - x0), fade = 1 - clamp01((e - LAND_S) / 0.6);
-      for (const side of [-1, 1]) {
-        ctx.globalAlpha = 0.55 * fade;
-        ctx.lineWidth = sw;
-        ctx.beginPath();
-        ctx.moveTo(bx, y);
-        ctx.lineTo(bx - dir * len, y + side * Math.min(z * 0.5, len * 0.12));
-        ctx.stroke();
-      }
-      ctx.globalAlpha = 0.3 * fade;
-      ctx.beginPath(); ctx.moveTo(bx, y); ctx.lineTo(bx - dir * len * 0.7, y); ctx.stroke();
-    }
-    const k0 = e - LAND_S;
+    // By day the boat sails in by itself (drawn with the wall); when it stops and hoists its sail,
+    // rings open on the water around it.
+    const y = h.water;
+    const k0 = e - 3.3;
     for (let i = 0; i < 3 && k0 > 0; i++) {
       const k = clamp01((k0 - i * 0.4) / 2.6);
       if (k <= 0 || k >= 1) continue;

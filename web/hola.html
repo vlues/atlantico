@@ -266,7 +266,7 @@
         // Composed taller than shown, so the sky gets most of the frame and the sea just shows.
         const comp = compose({ ...c, sun: sunPosition(new Date(), lat, lon), moon: moonPosition(new Date(), lat, lon) }, {
           width: w, height: Math.round(w * 1.15), dark: sunPosition(new Date(), lat, lon).altitude < -2, captions: false, date: Date.now(), style: state?.style,
-          visitors, hero: v.id, reveal: revealAt(e), time: Date.now() / 1000, lat, lon,
+          visitors, heroes: [{ id: v.id, reveal: revealAt(e), e }], time: Date.now() / 1000, lat, lon,
         });
         paint(ctx, comp, 1, null);
         // By day they are a sail on the bay; by night a star.
