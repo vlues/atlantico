@@ -35,6 +35,7 @@ export interface WallState {
   tour: { id: string | null; name: string | null; visits: number; stop: string; at: number; until: number; showcase?: boolean } | null;
   farewell: { id: string; name: string; at: number; until: number } | null;   // a guest tapping out
   music: { title: string; artist: string; by: { id: string; name: string } | null; at: number; next: { title: string; by: string } | null } | null;
+  surprise: { id: number; seed: number; at: number; until: number; size: string; force: string | null; cx: Record<string, unknown> } | null;
   scene: string;
   dark: boolean;
   visitors: Star[];
@@ -62,7 +63,7 @@ export async function wallState(env: Env, scenario?: string | null): Promise<Wal
   const lat = Number(env.LAT), lon = Number(env.LON);
   const t = Date.now();
   const [set, rows] = await Promise.all([
-    settings(env, ['demo:scenario', 'demo:sun', 'demo:style', 'demo:day', 'scene', 'welcome', 'tour', 'farewell', 'music:now']),
+    settings(env, ['demo:scenario', 'demo:sun', 'demo:style', 'demo:day', 'scene', 'welcome', 'tour', 'farewell', 'music:now', 'surprise']),
     env.DB.prepare('SELECT id, first_name, visits, last_seen, left_at FROM visitors ORDER BY created_at').all<any>()
       .then((r) => r.results).catch(() => []),
   ]);
@@ -102,6 +103,7 @@ export async function wallState(env: Env, scenario?: string | null): Promise<Wal
     tour: tour && tour.until > t ? tour : null,
     farewell: set.farewell && set.farewell.until > t ? set.farewell : null,
     music: set['music:now'] ?? null,
+    surprise: set.surprise && set.surprise.until > t ? set.surprise : null,
     sunOverride: sunOverride && SUN_PRESETS[sunOverride] ? sunOverride : null,
     scene: s, lat, lon, visitors, welcome: active,
     // The wall follows the real sky: paper by day, night after sunset (whatever the lights do).
@@ -121,13 +123,13 @@ export async function bumpWall(env: Env) {
  * Browser walls also follow the guest tour; e-ink panels don't (they would redraw for every stop).
  */
 export async function wallVersion(env: Env, withTour = false): Promise<string> {
-  const r = await env.DB.prepare("SELECT key, value FROM settings WHERE key IN ('wall:rev', 'welcome', 'tour', 'farewell', 'music:now')").all<{ key: string; value: string }>();
+  const r = await env.DB.prepare("SELECT key, value FROM settings WHERE key IN ('wall:rev', 'welcome', 'tour', 'farewell', 'music:now', 'surprise')").all<{ key: string; value: string }>();
   const get = (k: string) => { const row = r.results.find((x) => x.key === k); return row ? JSON.parse(row.value) : null; };
   const w: Welcome | null = get('welcome'), t = Date.now();
   const v = `${get('wall:rev') ?? 0}.${Math.floor(t / 900000)}${w && w.until > t ? `w${w.at}` : ''}`;
   if (!withTour) return v;
-  const tour = get('tour'), fw = get('farewell'), m = get('music:now');
-  return `${v}${tour && tour.until > t ? `t${tour.at}` : ''}${fw && fw.until > t ? `f${fw.at}` : ''}${m?.by ? `m${m.at}` : ''}`;
+  const tour = get('tour'), fw = get('farewell'), m = get('music:now'), sp = get('surprise');
+  return `${v}${tour && tour.until > t ? `t${tour.at}` : ''}${fw && fw.until > t ? `f${fw.at}` : ''}${m?.by ? `m${m.at}` : ''}${sp && sp.until > t ? `s${sp.id}` : ''}`;
 }
 
 function composeFor(state: WallState, width: number, height: number, overrides: { dark?: boolean } = {}, print = false) {

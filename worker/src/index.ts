@@ -12,8 +12,11 @@ import { firmwareCheck, firmwareImage } from './firmware';
 import { tourInfo, tourStop, playStop, STOPS } from './tour';
 import * as music from './music';
 import * as screens from './screens';
+import * as surprises from './surprises';
 // @ts-ignore — shared plain-JS module
 import { edition, STYLES } from '../../web/lib/art.js';
+// @ts-ignore
+import { ELEMENTS } from '../../web/lib/surprise.js';
 
 export default {
   async fetch(req: Request, env: Env, ctx: ExecutionContext): Promise<Response> {
@@ -37,6 +40,7 @@ export default {
 async function runCron(cron: string, env: Env) {
   await ensureSeeded(env);
   if (cron === '30 7 * * *') { await dailyCheck(env); return; }
+  await surprises.rollDice(env).catch((e) => console.error('surprise', e));
   if (env.SIMULATE === 'true') await simulatorTick(env);
   await wallState(env); // refreshes the live weather cache
   // A tour that ended without its last stop: put the lamps back (normally they return within 30 s).
@@ -65,6 +69,7 @@ on('GET', '/api/wall/version', async (_r, env, ctx) => {
   return new Response(await wallVersion(env, true), { headers: { 'content-type': 'text/plain', 'cache-control': 'no-store' } });
 });
 on('GET', '/api/music', (_r, env, _c, _m, url) => music.overview(env, url));
+on('POST', '/api/surprise/seen', (r, env, ctx) => surprises.seen(r, env, ctx));
 on('GET', '/api/music/search', (_r, env, _c, _m, url) => music.search(env, url));
 on('GET', '/api/music/suggest', (_r, env, ctx, _m, url) => music.suggest(env, url, ctx));
 on('POST', '/api/music/queue', (r, env, ctx) => music.queue(r, env, ctx));
@@ -242,6 +247,8 @@ async function overview(env: Env) {
       day: Math.round((wall.editionDate - Date.now()) / 86400000),
       coming,
       stops: Object.keys(STOPS),
+      elements: Object.entries(ELEMENTS).map(([id, e]: [string, any]) => ({ id, es: e.es, en: e.en, when: e.when })),
+      surprise: await surprises.current(env),
       offline: JSON.parse((await flag(env, 'demo:offline')) ?? '[]'),
     },
   });
@@ -282,6 +289,9 @@ async function demo(req: Request, env: Env, ctx: ExecutionContext): Promise<Resp
       await playStop(env, ctx, { id: v?.id ?? null, name: v?.first_name ?? null, visits: v?.visits ?? 1 }, String(b.value));
       return json({ ok: true });
     }
+    case 'surprise':
+      // A surprise now: 'random', 'small', or led by one element (see web/lib/surprise.js).
+      return surprises.demoSurprise(env, String(b.value ?? 'random'));
     case 'showcase':
       // Every daily style in turn on the wall, for 40 seconds.
       await playStop(env, ctx, { id: null, name: null, visits: 0 }, 'edition', true);

@@ -362,7 +362,7 @@ export function musicOverlay(ctx, comp, m, e) {
   ctx.restore();
 }
 
-function band(ctx, comp, title, sub, a) {
+export function band(ctx, comp, title, sub, a) {
   if (a <= 0) return;
   const W = comp.width, H = comp.height, S = Math.min(W, H);
   const p = comp.palette ?? (comp.dark ? PALETTE.dark : PALETTE.light);

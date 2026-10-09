@@ -208,6 +208,10 @@ function renderDemo() {
   chips($('d-sea'), d.scenarios, d.scenario, 'sea');
   chips($('d-sun'), d.suns, d.sun, 'sun');
   chips($('d-style'), d.styles, d.style, 'style');
+  if (!$('d-elements').children.length) {
+    $('d-elements').innerHTML = d.elements.map((x) => `<button class="btn small" data-element="${esc(x.id)}" title="${esc(x.en)}${x.when !== 'any' ? ` (${x.when === 'day' ? 'by day' : 'at night'}, shown now anyway)` : ''}">${esc(x.es)}</button>`).join('');
+  }
+  $('d-surprisestate').textContent = d.surprise ? `Nº ${d.surprise.id}: ${d.surprise.title.es} · ${d.surprise.title.en}${d.surprise.at > Date.now() ? ` (in ${Math.max(1, Math.round((d.surprise.at - Date.now()) / 60000))} min)` : ' (playing)'}` : 'They also come by themselves, at random, a few times a day.';
   $('d-days').innerHTML = d.coming.map((x) => `<button class="btn small ${x.day === d.day && d.style === 'today' ? 'on' : ''}" data-day="${x.day}" title="${esc(x.label)}">${x.day === 0 ? 'Today' : `Nº ${x.n}`} · ${esc(x.style)} · ${esc(x.palette)}</button>`).join('');
   const sel = $('d-plant');
   if (!sel.options.length) sel.innerHTML = data.plants.map((p) => `<option value="${p.id}">${esc(p.name)}</option>`).join('');
@@ -222,6 +226,13 @@ $('d-days').addEventListener('click', (e) => {
   const v = e.target.closest('[data-day]')?.dataset.day;
   if (v != null) act('/api/demo', { action: 'day', value: Number(v) }, v === '0' ? "Back to today's edition" : 'Previewing that day on the wall');
 });
+const surpriseNow = async (value) => {
+  const r = await act('/api/demo', { action: 'surprise', value });
+  if (r?.title) toast(`Nº ${r.id}: ${r.title.es} · on every screen in a moment`);
+};
+$('d-surprise').addEventListener('click', () => surpriseNow('random'));
+$('d-surprise-small').addEventListener('click', () => surpriseNow('small'));
+$('d-elements').addEventListener('click', (e) => { const v = e.target.closest('[data-element]')?.dataset.element; if (v) surpriseNow(v); });
 $('d-showcase').addEventListener('click', () => act('/api/demo', { action: 'showcase' }, 'Every style in turn, on the wall, for 40 seconds'));
 // The guest tour, played from here: each stop for seven seconds, then the lamps settle back.
 let touring = false;

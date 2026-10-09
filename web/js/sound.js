@@ -1,3 +1,5 @@
+import { scaleOf } from '../lib/surprise.js';
+
 // Soft sounds, synthesized on the spot (no audio files): surf, bell-like chimes, a slow chord.
 // Browsers only allow sound after a tap, so it is always opt-in; the choice is remembered.
 const KEY = 'atlantico-sound';
@@ -76,5 +78,56 @@ export function stopSound(stop) {
     case 'plants': chime(660, 0, 0.07); chime(990, 0.1, 0.05); break;
     case 'light': chime(440, 0, 0.07); chime(330, 0.5, 0.07); break;
     case 'end': chime(523, 0, 0.07); chime(784, 0.3, 0.06); break;
+  }
+}
+
+// ── Surprises: a melody grown from the recipe, plus sounds timed to what is happening ──────────
+
+function tone(type, freq, when, level, attack, decay, glideTo = null) {
+  const t = ac.currentTime + when, o = ac.createOscillator(), g = ac.createGain();
+  o.type = type;
+  o.frequency.setValueAtTime(freq, t);
+  if (glideTo) o.frequency.exponentialRampToValueAtTime(glideTo, t + attack + decay);
+  g.gain.setValueAtTime(0, t);
+  g.gain.linearRampToValueAtTime(level, t + attack);
+  g.gain.exponentialRampToValueAtTime(0.0001, t + attack + decay);
+  o.connect(g).connect(out);
+  o.start(t);
+  o.stop(t + attack + decay + 0.05);
+}
+function noise(when, seconds, level, from, to) {
+  const n = Math.floor(ac.sampleRate * seconds), buf = ac.createBuffer(1, n, ac.sampleRate), d = buf.getChannelData(0);
+  for (let i = 0; i < n; i++) d[i] = (Math.random() * 2 - 1) * Math.pow(1 - i / n, 2);
+  const src = ac.createBufferSource(), f = ac.createBiquadFilter(), g = ac.createGain(), t = ac.currentTime + when;
+  src.buffer = buf; f.type = 'bandpass'; f.frequency.setValueAtTime(from, t); f.frequency.exponentialRampToValueAtTime(to, t + seconds);
+  g.gain.value = level;
+  src.connect(f).connect(g).connect(out);
+  src.start(t);
+}
+function note(timbre, f, when) {
+  if (timbre === 'pluck') tone('triangle', f, when, 0.07, 0.005, 0.6);
+  else if (timbre === 'glass') { tone('sine', f * 2, when, 0.04, 0.01, 1.6); tone('sine', f * 3.01, when, 0.015, 0.01, 1.1); }
+  else if (timbre === 'pad') tone('sine', f / 2, when, 0.05, 0.6, 2.4);
+  else chime(f, when, 0.06);
+}
+
+/** Play a surprise's sound: `cues(layer)` gives the moments things happen in that layer. */
+export function surpriseSound(rec, cues) {
+  if (!live()) return;
+  const steps = scaleOf(rec.sound.mode);
+  for (let i = 0; i < rec.sound.notes; i++) {
+    const deg = rec.sound.steps[i % rec.sound.steps.length], oct = Math.floor(deg / steps.length);
+    note(rec.sound.timbre, rec.sound.root * Math.pow(2, (steps[deg % steps.length] + 12 * oct) / 12), 0.2 + i * rec.sound.tempo);
+  }
+  for (const L of rec.layers) {
+    const at = (m) => L.delay + m;
+    for (const m of cues(L).slice(0, 14)) {
+      if (L.kind === 'fireworks') { noise(at(m) + 0.7, 0.35, 0.5, 1800, 200); noise(at(m) + 0.75, 1.2, 0.08, 4000, 2500); }
+      else if (L.kind === 'dolphins' || L.kind === 'dive' || L.kind === 'flyingfish') noise(at(m) + 1.2, 0.4, 0.25, 900, 2400);
+      else if (L.kind === 'whale') tone('sine', 230, at(m) + 0.5, 0.06, 0.8, 2.6, 130);
+      else if (L.kind === 'tallship') [0, 0.6, 1.2].forEach((d) => chime(523, at(m) + 1 + d, 0.07));
+      else if (L.kind === 'lighthouse') tone('sine', 98, at(m) + 0.5, 0.07, 0.4, 2.2);
+      else if (L.kind === 'meteors' || L.kind === 'comet' || L.kind === 'constellation') chime(1320 + 220 * Math.random(), at(m), 0.03);
+    }
   }
 }

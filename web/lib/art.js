@@ -487,14 +487,51 @@ export function compose(c, o = {}) {
     return { x: p.x + amp * u1, y: p.y + amp * 0.6 * u2 };
   };
   const boatHome = (h) => ({ sd: 0.05 + 0.32 * hash(h, 4, 19), x: mx + fw * (0.06 + 0.88 * hash(h, 3, 17)) });
-  const boatAt = (h) => {
+  const boatAt = (h, at = t) => {
     const b = boatHome(h);
     if (!live) return { ...b, fwd: hash(h, 9, 3) < 0.5 ? 1 : -1, speed: 0 };
-    const [u1, u2, dv] = wander(h, 8, 150 + 150 * hash(h, 10, 5));
+    const w = TAU / (150 + 150 * hash(h, 10, 5)), ph = hash(h, 8, 5) * TAU;
+    const [u1, u2, dv] = [Math.sin(at * w + ph), Math.sin(at * w * 1.37 + ph * 1.7), Math.cos(at * w + ph)];
     const amp = fw * 0.07 * (0.6 + 0.8 * hash(h, 11, 5));
     // fwd eases through zero as the boat comes about (seen bow-on for a moment), rather than flipping.
     const fwd = Math.sign(dv || 1) * Math.max(0.14, Math.min(1, Math.abs(dv) * 3));
     return { x: clamp(b.x + amp * u1, mx + S * 0.03, W - mx - S * 0.03), sd: clamp(b.sd + 0.035 * u2, 0.03, 0.45), fwd, speed: Math.abs(dv) };
+  };
+
+  // Past guests by day: a few at a time sail along far out (each passes by every hour or so), and
+  // someone who has just left keeps drifting out there for a while first. Deleted guests never return.
+  const pastCount = Math.max(1, (o.visitors ?? []).filter((v) => !v.here).length);
+  const duty = clamp(6 / pastCount, 0.05, 1);
+  const ghostAt = (h, v, dep) => {
+    let fwd = hash(h, 42, 7) < 0.5 ? 1 : -1, x, sd, alpha = 1;
+    const lane = 0.02 + 0.2 * hash(h, 41, 7); // each has its own distance out, so they don't bunch up
+    const mk = () => ({ x, wy: waterY(sd, x), sd, size: S * (0.034 + 0.07 * sd), h, v, hoist: 1, sink: 0, fwd, speed: o.print ? 0 : 0.6, ghost: 1, fade: alpha, labelFade: 0 });
+    if (dep) {
+      // Just left: carries on out of the bay at sailing pace, settling into its lane.
+      const from = boatAt(h, t - (dep.age ?? 0)), age = Math.max(0, (dep.age ?? 0) - 8);
+      fwd = Math.sign(from.fwd) || 1;
+      sd = from.sd * 0.15 + (lane - from.sd * 0.15) * ease(age / 60);
+      x = from.x + fwd * (fw * 0.12 + S * 0.012 * age);
+      if (x < mx - S * 0.05 || x > W - mx + S * 0.05) return null;
+      return mk();
+    }
+    if (o.print) {
+      // On e-ink, a handful sit still out there.
+      if (hash(h, 44, 7) > Math.min(1, 5 / pastCount)) return null;
+      x = mx + fw * (0.05 + 0.9 * hash(h, 45, 7));
+      sd = lane;
+      return mk();
+    }
+    // Everyone else who has been here sails past now and then: each crossing takes a minute or
+    // three, and turns come round often enough that about five are out at any time.
+    const cross = 70 + 110 * hash(h, 46, 7), period = Math.max(cross * 1.4, (cross * pastCount) / 5);
+    const phase = (t + hash(h, 43, 7) * period) % period;
+    if (phase >= cross) return null;
+    const q = phase / cross;
+    x = (fwd > 0 ? mx - S * 0.03 : W - mx + S * 0.03) + fwd * (fw + S * 0.06) * q;
+    sd = lane + 0.012 * Math.sin(t * 0.15 + (h % 50));
+    alpha = clamp(Math.min(q, 1 - q) * 10, 0, 1);
+    return mk();
   };
 
   const stars = [], boats = [];
@@ -525,8 +562,14 @@ export function compose(c, o = {}) {
         if (!(hero && (hz.reveal ?? 1) < 0.02)) stars.push({ x: P.x, y: P.y, hx: home.x, hy: home.y, h, v: { ...v, name }, hero, reveal: hz?.reveal ?? 1, here, dep: dep ? dep.p : null, gone: !!v.gone });
       }
     }
+    if (sailsA > 0 && !v.gone && !here && !(dep && dep.p < 1)) {
+      // A guest who has been here: far out on the bay now and then, a small white sail of their own.
+      const g = ghostAt(h, v, dep);
+      if (g) boats.push(g);
+      continue;
+    }
     if (sailsA > 0 && (here || dep)) {
-      let { x, sd, fwd, speed } = boatAt(h);
+      let { x, sd, fwd, speed } = boatAt(h, dep ? t - (dep.age ?? 0) : t);
       let hoist = hero ? 1 - Math.pow(1 - (hz.reveal ?? 1), 3) : 1, sink = 0;
       if (hero && hz.e != null && live) {
         // Arriving: sails in from one side with a bare mast, stops at its place, hoists its sail.
@@ -534,18 +577,20 @@ export function compose(c, o = {}) {
         x = home.x - from * fw * 0.3 * (1 - p); sd = home.sd; fwd = from; speed = 1 - p;
         hoist = ease(clamp((hz.e - 3) / 1.4, 0, 1));
       }
+      let ghost = 0;
       if (dep) {
-        // Leaving: off toward the horizon, then over it: the hull drops out of sight, then the sail.
-        const k = ease(clamp(dep.p / 0.6, 0, 1));
-        sd *= 1 - 0.97 * k;
-        x = clamp(x + fwd * fw * 0.12 * k, mx, W - mx);
+        // Leaving: out toward the horizon, the gold fading to white: they stay out there, a small sail.
+        const k = ease(clamp(dep.p / 0.7, 0, 1));
+        fwd = Math.sign(fwd) || 1;
+        sd *= 1 - 0.85 * k;
+        x = x + fwd * fw * 0.12 * k;
         speed = 0.8;
-        sink = clamp((dep.p - 0.6) / 0.4, 0, 1);
+        ghost = clamp((dep.p - 0.45) / 0.55, 0, 1);
       }
       const wy = waterY(sd, x), size = S * (0.034 + 0.07 * sd) * (hero ? 1.25 : 1);
       if (hero && byDay) heroAt.push({ id: v.id, x, y: wy - size * 0.55, kind: 'sail', water: wy, size });
       const hb = boatHome(h);
-      boats.push({ x, wy, sd, size, h, v: { ...v, name }, hero, hoist, sink, fwd, speed, leaving: !!dep, hx: hb.x, hy: waterY(hb.sd, hb.x) - size * 0.55, fade: dep ? 1 - clamp((dep.p - 0.9) / 0.1, 0, 1) : 1, labelFade: dep ? 1 - ease(dep.p * 2) : 1 });
+      boats.push({ x, wy, sd, size, h, v: { ...v, name }, hero, hoist, sink, fwd, speed, leaving: !!dep, ghost, hx: hb.x, hy: waterY(hb.sd, hb.x) - size * 0.55, fade: 1, labelFade: dep ? 1 - ease(dep.p * 2) : 1 });
     }
   }
 
@@ -602,32 +647,84 @@ export function compose(c, o = {}) {
 
   const sparks = [];
   const labels = [];
+  // Each guest's star has its own kind and its own twinkle; it gains rays and a halo with visits.
+  const STAR_KINDS = ['sparkle', 'cross', 'six', 'ring', 'double', 'halo'];
+  const ray = (x, y, dx, dy, d0, l, A, thin, out) => {
+    out.push({ pts: [x + dx * d0, y + dy * d0, x + dx * (d0 + (l - d0) * 0.45), y + dy * (d0 + (l - d0) * 0.45)], alpha: 0.95 * A, weight: 1.5, accent: 'here' });
+    out.push({ pts: [x + dx * d0, y + dy * d0, x + dx * l, y + dy * l], alpha: 0.9 * A, weight: thin, accent: 'here' });
+  };
+  const ellipse = (x, y, rx, ry, rot, n = 28) => {
+    const pts = [];
+    for (let q = 0; q <= n; q++) { const a = (q / n) * TAU; pts.push(x + rx * Math.cos(a) * Math.cos(rot) - ry * Math.sin(a) * Math.sin(rot), y + rx * Math.cos(a) * Math.sin(rot) + ry * Math.sin(a) * Math.cos(rot)); }
+    return pts;
+  };
   for (const d of dots) {
     const A = starsA;
-    const regular = 1 + 0.22 * Math.min(4, Math.max(0, (d.v.visits ?? 1) - 1));
-    const settle = d.dep != null ? ease(d.dep) : d.here ? 0 : 1; // 0 sparkling … 1 a quiet star
-    if (settle > 0 && !d.gone) circles.push({ x: d.x, y: d.y, r: Math.max(1, S * 0.0022) * regular, fill: true, alpha: (o.welcome ? 0.35 : 0.75) * A * settle, accent: 'visitor' });
-    if (settle >= 1) continue;
-    // A four-point sparkle: thicker near the core, hairline at the tips, slow twinkle on screens.
-    const glow = 1 - settle;
-    const tw = o.print ? 1 : 1 + 0.12 * Math.sin(t * 1.7 + (d.h % 628) / 100);
-    const grow = 1 - Math.pow(1 - d.reveal, 3);
-    const L = (d.hero ? S * 0.05 * grow : S * 0.027) * tw * (d.hero ? 1 : regular * 0.85) * (0.4 + 0.6 * glow);
-    const d0 = S * (d.hero ? 0.009 : 0.006);
-    const thin = o.print ? 1 : 0.8;
-    for (const [dx, dy, len] of [[1, 0, 1], [-1, 0, 1], [0, 1, 1], [0, -1, 1], [0.7071, 0.7071, 0.42], [-0.7071, 0.7071, 0.42], [0.7071, -0.7071, 0.42], [-0.7071, -0.7071, 0.42]]) {
-      const l = Math.max(d0 * 1.2, L * len);
-      sparks.push({ pts: [d.x + dx * d0, d.y + dy * d0, d.x + dx * (d0 + (l - d0) * 0.45), d.y + dy * (d0 + (l - d0) * 0.45)], alpha: 0.95 * A * glow, weight: len < 1 ? thin : 1.5, accent: 'here' });
-      if (len === 1) sparks.push({ pts: [d.x + dx * d0, d.y + dy * d0, d.x + dx * l, d.y + dy * l], alpha: 0.9 * A * glow, weight: thin, accent: 'here' });
+    const visits = d.v.visits ?? 1;
+    const regular = 1 + 0.22 * Math.min(4, Math.max(0, visits - 1));
+    const settle = d.dep != null ? ease(d.dep) : d.here ? 0 : 1; // 0 shining … 1 a quiet star
+    if (settle > 0 && !d.gone) {
+      circles.push({ x: d.x, y: d.y, r: Math.max(1, S * 0.0022) * regular, fill: true, alpha: (o.welcome ? 0.35 : 0.75) * A * settle, accent: 'visitor' });
+      if (visits >= 4 && !o.print) { // regulars keep a faint glint even when they're away
+        const gl = S * 0.006 * (1 + 0.3 * Math.sin(t * (0.6 + hash(d.h, 52, 7)) + d.h));
+        for (const [dx, dy] of [[1, 0], [0, 1]]) sparks.push({ pts: [d.x - dx * gl, d.y - dy * gl, d.x + dx * gl, d.y + dy * gl], alpha: 0.35 * A * settle, weight: 0.7, accent: 'visitor' });
+      }
     }
-    circles.push({ x: d.x, y: d.y, r: S * (d.hero ? 0.0062 : 0.0045), fill: true, alpha: A * glow, accent: 'here' });
-    circles.push({ x: d.x, y: d.y, r: S * (d.hero ? 0.017 + 0.004 * Math.sin(t * 0.9) * (o.print ? 0 : 1) : 0.0115), fill: false, alpha: (d.hero ? 0.55 : 0.4) * A * glow, accent: 'here' });
-    if (d.v.name && !o.welcome && !byDay) { d.fade = glow; labels.push(d); } // during a welcome, the arrivals have the stage
+    if (settle >= 1) continue;
+    const glow = (1 - settle) * A;
+    const kind = STAR_KINDS[Math.floor(hash(d.h, 51, 7) * STAR_KINDS.length)];
+    // Twinkling is the air: stronger in wind and low over the horizon, where the light crosses more of it.
+    const lowness = clamp(1 - (horizon - d.y) / Math.max(1, horizon - H * 0.1), 0, 1);
+    const pace = (0.8 + 1.6 * hash(d.h, 53, 7)) * (1 + 1.5 * wN), depth = (0.08 + 0.1 * hash(d.h, 54, 7)) * (1 + 1.2 * wN + 0.8 * lowness);
+    const tw = o.print ? 1 : 1 + depth * Math.sin(t * pace + (d.h % 628) / 100);
+    const grow = 1 - Math.pow(1 - d.reveal, 3);
+    const L = (d.hero ? S * 0.05 * grow : S * 0.027) * tw * (d.hero ? 1 : regular * 0.85) * (0.4 + 0.6 * (1 - settle));
+    const d0 = S * (d.hero ? 0.009 : 0.006), core = S * (d.hero ? 0.0062 : 0.0045);
+    const thin = o.print ? 1 : 0.8;
+    const spin = (live ? t * 0.03 * (hash(d.h, 55, 7) - 0.5) : 0) + hash(d.h, 56, 7) * 0.3;
+    const at = (k, n) => [Math.cos(spin + (k * TAU) / n), Math.sin(spin + (k * TAU) / n)];
+    if (kind === 'sparkle') {
+      for (let k = 0; k < 4; k++) { const [dx, dy] = at(k, 4); ray(d.x, d.y, dx, dy, d0, L, glow, thin, sparks); }
+      for (let k = 0; k < 4; k++) { const [dx, dy] = at(k + 0.5, 4); ray(d.x, d.y, dx, dy, d0, Math.max(d0 * 1.2, L * 0.42), glow, thin, sparks); }
+    } else if (kind === 'cross') {
+      // Diffraction spikes: long and fine, like a bright star in a telescope.
+      for (let k = 0; k < 4; k++) { const [dx, dy] = at(k, 4); sparks.push({ pts: [d.x + dx * d0 * 0.6, d.y + dy * d0 * 0.6, d.x + dx * L * 1.5, d.y + dy * L * 1.5], alpha: 0.9 * glow, weight: thin * 0.9, accent: 'here' }); }
+      for (let k = 0; k < 4; k++) { const [dx, dy] = at(k + 0.5, 4); sparks.push({ pts: [d.x + dx * d0 * 0.6, d.y + dy * d0 * 0.6, d.x + dx * L * 0.3, d.y + dy * L * 0.3], alpha: 0.6 * glow, weight: thin, accent: 'here' }); }
+    } else if (kind === 'six') {
+      for (let k = 0; k < 6; k++) { const [dx, dy] = at(k, 6); ray(d.x, d.y, dx, dy, d0, Math.max(d0 * 1.2, L * (k % 2 ? 0.62 : 1)), glow, thin, sparks); }
+    } else if (kind === 'ring') {
+      // A small world with a ring, slowly turning.
+      for (let k = 0; k < 4; k++) { const [dx, dy] = at(k + 0.5, 4); ray(d.x, d.y, dx, dy, d0, Math.max(d0 * 1.2, L * 0.55), glow, thin, sparks); }
+      sparks.push({ pts: ellipse(d.x, d.y, L * 0.8, L * 0.26, 0.35 + spin * 2), alpha: 0.75 * glow, weight: thin, accent: 'here' });
+    } else if (kind === 'double') {
+      // A pair circling each other.
+      const ob = S * 0.007, oa = (live ? t * 0.35 : 0) + hash(d.h, 57, 7) * TAU;
+      for (const sgn of [1, -1]) {
+        const cx = d.x + sgn * ob * Math.cos(oa), cy = d.y + sgn * ob * 0.6 * Math.sin(oa);
+        for (let k = 0; k < 4; k++) { const [dx, dy] = at(k, 4); ray(cx, cy, dx, dy, d0 * 0.6, Math.max(d0, L * 0.55), glow, thin, sparks); }
+        circles.push({ x: cx, y: cy, r: core * 0.75, fill: true, alpha: glow, accent: 'here' });
+      }
+    } else {
+      // Halo: rings breathing out from it.
+      for (let k = 0; k < 4; k++) { const [dx, dy] = at(k, 4); ray(d.x, d.y, dx, dy, d0, Math.max(d0 * 1.2, L * 0.7), glow, thin, sparks); }
+      for (let i = 0; i < 2; i++) {
+        const ph = live ? (t * 0.12 * pace + i / 2) % 1 : 0.4 + 0.3 * i;
+        circles.push({ x: d.x, y: d.y, r: S * (0.008 + 0.026 * ph), fill: false, alpha: 0.6 * (1 - ph) * glow, accent: 'here' });
+      }
+    }
+    // Regulars grow: hairline rays at three visits, a steady halo at six.
+    if (visits >= 3 && kind !== 'sparkle') for (let k = 0; k < 4; k++) { const [dx, dy] = at(k + 0.25, 4); sparks.push({ pts: [d.x + dx * d0, d.y + dy * d0, d.x + dx * L * 0.5, d.y + dy * L * 0.5], alpha: 0.5 * glow, weight: thin * 0.8, accent: 'here' }); }
+    if (visits >= 6) circles.push({ x: d.x, y: d.y, r: L * 0.95, fill: false, alpha: 0.22 * glow, accent: 'here' });
+    if (kind !== 'double') circles.push({ x: d.x, y: d.y, r: core, fill: true, alpha: glow, accent: 'here' });
+    if (kind === 'sparkle') circles.push({ x: d.x, y: d.y, r: S * (d.hero ? 0.017 + 0.004 * Math.sin(t * 0.9) * (live ? 1 : 0) : 0.0115), fill: false, alpha: (d.hero ? 0.55 : 0.4) * glow, accent: 'here' });
+    if (d.v.name && !o.welcome && !byDay) { d.fade = 1 - settle; labels.push(d); } // during a welcome, the arrivals have the stage
   }
 
-  // Sails: a gold mainsail aft, a paper jib forward, mast and hull, heeling with the wind and rocking
-  // a little on the swell; a faint wake when under way. Farther boats are drawn first.
-  const below = (pts, yMax) => { // keep only what is above the horizon (for a boat going hull-down)
+  // Boats: each guest has their own kind (sloop, catamaran, lateen falucho, schooner, gaff cutter) and
+  // pennant; the mainsail changes each visit (stripes, their visit number, an emblem or plain). Guests
+  // who are here sail gold; past guests are small white sails far out. Farther boats are drawn first.
+  const BOAT_KINDS = ['sloop', 'cat', 'lateen', 'schooner', 'gaff'];
+  const below = (pts, yMax) => { // keep only what is above a line (a boat going hull-down)
     const out = [];
     for (let q = 0; q < pts.length; q += 2) {
       const x1 = pts[q], y1 = pts[q + 1], x2 = pts[(q + 2) % pts.length], y2 = pts[(q + 3) % pts.length];
@@ -641,13 +738,21 @@ export function compose(c, o = {}) {
     const z = b.size, f = b.fwd;
     const A = sailsA * b.fade;
     if (A <= 0.01) continue;
-    const ang = clamp(wN * 0.22, 0, 0.3) * wdir + (live ? Math.sin(t * 0.9 + (b.h % 97)) * 0.035 : 0);
+    const gold = 1 - b.ghost; // gold for guests who are here, paper white for those who have been
+    const kind = BOAT_KINDS[Math.floor(hash(b.h, 31, 7) * BOAT_KINDS.length)];
+    const deco = Math.floor(hash(b.h * 31 + (b.v.visits ?? 1), 33, 7) * 4);
+    // Physics of the water: the hull lies along the slope of the wave beneath it (pitching as swells
+    // pass), heels with the wind, and rolls a little in time with the real wave period.
+    const slope = Math.atan2(waterY(b.sd, b.x + z * 0.45) - waterY(b.sd, b.x - z * 0.45), z * 0.9);
+    const roll = live ? Math.sin((t * TAU) / T + (b.h % 97)) * 0.04 * (0.3 + hN) : 0;
+    const ang = clamp(slope * 0.85, -0.45, 0.45) + clamp(wN * 0.22, 0, 0.3) * wdir + roll;
     const cs = Math.cos(ang), sn = Math.sin(ang);
     const X = b.x, Y = b.wy + b.sink * z * 1.1;
-    const P = (dx, dy) => [X + dx * cs - dy * sn, Y + dx * sn + dy * cs];
-    const cut = b.sink > 0 ? b.wy : Infinity; // going over the horizon: nothing below the waterline shows
-    const shape = (pts, accent, alpha) => { const q = cut < Infinity ? below(pts, cut) : pts; if (q.length >= 6) shapes.push({ pts: q, alpha, accent }); };
+    const P = (dx, dy) => [X + dx * f * z * cs - dy * z * sn, Y + dx * f * z * sn + dy * z * cs]; // dx forward, dy up (negative), in boat lengths
+    const cut = b.sink > 0 ? b.wy : Infinity;
+    const shape = (pts, accent, alpha) => { const q = cut < Infinity ? below(pts, cut) : pts; if (q.length >= 6 && alpha > 0.005) shapes.push({ pts: q, alpha, accent }); };
     const mark = (pts, alpha, weight, accent = 'here') => {
+      if (alpha <= 0.005) return;
       if (cut === Infinity) return marks.push({ pts, alpha, weight, accent });
       let seg = [];
       for (let q = 0; q < pts.length; q += 2) {
@@ -656,33 +761,101 @@ export function compose(c, o = {}) {
       }
       if (seg.length >= 4) marks.push({ pts: seg, alpha, weight, accent });
     };
-    const boom = -0.13 * z, head = boom - 0.88 * z * b.hoist;
-    const wakeA = clamp((b.speed - 0.15) / 0.35, 0, 1) * 0.4 * A;
+    // A sail: gold while they're here, outlined paper when they've been.
+    const sail = (pts) => {
+      shape(pts, 'here', A * gold);
+      if (gold < 1) { shape(pts, 'bg', A * (1 - gold)); mark([...pts, pts[0], pts[1]], 0.7 * A * (1 - gold), 0.8, null); }
+    };
+    const ink = (pts, alpha, weight) => { mark(pts, alpha * gold, weight); if (gold < 1) mark(pts, alpha * (1 - gold) * 0.75, weight * 0.9, null); };
+    const hoist = b.hoist, boom = -0.13;
+    const long = kind === 'schooner' ? 1.18 : 1;
+    const wakeA = clamp((b.speed - 0.15) / 0.35, 0, 1) * 0.4 * A * (b.ghost ? 0.5 : 1);
     if (live && wakeA > 0.01 && !b.sink) {
       // Wake: two lines opening out behind the stern, fading in and out with speed.
-      const Lw = z * (0.6 + 1.8 * b.speed), sx = X - f * 0.5 * z;
+      const Lw = z * (0.6 + 1.8 * b.speed), sx = X - f * 0.5 * z * long;
       for (const side of [-1, 1]) mark([sx, Y + z * 0.02, sx - f * Lw, Y + z * 0.02 + side * Lw * 0.14], wakeA, 0.7, null);
     }
-    shape([...P(-0.56 * z * f, -0.13 * z), ...P(0.6 * z * f, -0.13 * z), ...P(0.44 * z * f, 0.02 * z), ...P(-0.46 * z * f, 0.02 * z)], 'bg', A);
-    if (b.hoist > 0.03) {
-      const main = [...P(-0.02 * z * f, head), ...P(-0.02 * z * f, boom)];
-      for (let q = 0; q <= 8; q++) {
-        const u = q / 8;
-        main.push(...P(-(0.5 * (1 - u) + 0.02 * u + 0.07 * Math.sin(Math.PI * u)) * z * f, boom + (head - boom) * u));
-      }
-      shape(main, 'here', A);
-      const jib = [...P(0.02 * z * f, boom - 0.74 * z * b.hoist), ...P(0.42 * z * f, boom), ...P(0.03 * z * f, boom)];
-      shape(jib, 'bg', A);
-      mark([...jib, jib[0], jib[1]], 0.9 * A, 0.9);
+    // Hull (two for a catamaran): a paper silhouette so the sea doesn't show through, then its line.
+    const hulls = kind === 'cat' ? [[0, -0.07, 0.55], [0, 0, 1]] : [[0, 0, 1]];
+    for (const [hx, hy, ha] of hulls) {
+      shape([...P(-0.56 * long, -0.13 + hy), ...P(0.6 * long, -0.13 + hy), ...P(0.44 * long, 0.02 + hy), ...P(-0.46 * long, 0.02 + hy)], 'bg', A);
+      ink([...P(-0.46 * long, hy), ...P(-0.56 * long, -0.09 + hy), ...P(-0.56 * long, -0.13 + hy)], A * ha, 1.1);
+      ink([...P(-0.46 * long, hy), ...P(0.44 * long, hy), ...P(0.6 * long, -0.11 + hy)], A * ha, 1.4);
     }
-    mark([...P(0, 0.02 * z), ...P(0, Math.min(boom, head) - 0.06 * z)], A, 1.1);
-    mark([...P(-0.46 * z * f, 0), ...P(-0.56 * z * f, -0.09 * z), ...P(-0.56 * z * f, -0.13 * z)], A, 1.1);
-    mark([...P(-0.46 * z * f, 0), ...P(0.44 * z * f, 0), ...P(0.6 * z * f, -0.11 * z)], A, 1.4);
-    if (!b.leaving) {
+    if (kind === 'cat') ink([...P(0.12, -0.13), ...P(0.12, -0.2), ...P(-0.3, -0.2), ...P(-0.3, -0.13)], A * 0.8, 0.9);
+    // Rig and sails.
+    let mastTop = boom - 0.94 * hoist, main = null, mainLeech = null;
+    if (kind === 'lateen') {
+      // Falucho: a short mast and a long slanting yard with a triangular sail beneath it.
+      mastTop = boom - 0.6;
+      const tack = [0.46, boom + 0.02], peak = [-0.58, boom - 1.0 * hoist], clew = [-0.4, boom];
+      ink([...P(0, 0.02), ...P(0, mastTop)], A, 1.1);
+      if (hoist > 0.03) {
+        const pts = [...P(...tack)];
+        for (let q = 1; q <= 8; q++) { const u = q / 8; pts.push(...P(tack[0] + (peak[0] - tack[0]) * u, tack[1] + (peak[1] - tack[1]) * u - 0.05 * Math.sin(Math.PI * u))); }
+        pts.push(...P(...clew));
+        sail(pts);
+        ink([...P(tack[0] + 0.06, tack[1] + 0.04), ...P(peak[0] - 0.04, peak[1] - 0.03)], A, 1.2);
+      }
+    } else {
+      const masts = kind === 'schooner' ? [[0.22, 0.72], [-0.12, 1]] : [[0, 1]];
+      for (const [mxp, mh] of masts) ink([...P(mxp, 0.02), ...P(mxp, boom - (0.94 * mh) * Math.max(hoist, 0.55))], A, 1.1);
+      mastTop = boom - 0.94 * Math.max(hoist, 0.55) + 0;
+      if (hoist > 0.03) {
+        const luff = kind === 'schooner' ? -0.14 : -0.02, wide = kind === 'cat' ? 0.56 : kind === 'schooner' ? 0.46 : 0.5;
+        const head = boom - 0.88 * hoist;
+        if (kind === 'gaff') {
+          // Four-sided mainsail under an angled gaff.
+          const throat = [luff, boom - 0.62 * hoist], peak = [luff - 0.44, boom - 0.95 * hoist];
+          main = [...P(luff, boom), ...P(...throat), ...P(...peak), ...P(luff - 0.52, boom)];
+          ink([...P(...throat), ...P(peak[0] - 0.03, peak[1] - 0.02)], A, 1.1);
+          mainLeech = (u) => [luff - 0.52 + 0.08 * u, boom + (peak[1] - boom) * u];
+        } else {
+          main = [...P(luff, head), ...P(luff, boom)];
+          for (let q = 0; q <= 8; q++) { const u = q / 8; main.push(...P(luff - (wide * (1 - u) + 0.02 * u + 0.07 * Math.sin(Math.PI * u)), boom + (head - boom) * u)); }
+          mainLeech = (u) => [luff - (wide * (1 - u) + 0.02 * u + 0.07 * Math.sin(Math.PI * u)), boom + (head - boom) * u];
+        }
+        sail(main);
+        if (kind === 'schooner') { // the foresail between the masts
+          const fh = boom - 0.64 * hoist;
+          sail([...P(0.2, fh), ...P(0.2, boom), ...P(-0.08, boom)]);
+        }
+        const jibFoot = kind === 'schooner' ? 0.66 : kind === 'gaff' ? 0.38 : 0.42;
+        const jibHead = kind === 'schooner' ? [0.24, boom - 0.66 * hoist] : [0.02, boom - 0.74 * hoist];
+        const jib = [...P(...jibHead), ...P(jibFoot, boom), ...P(jibHead[0] + 0.01, boom)];
+        shape(jib, 'bg', A);
+        mark([...jib, jib[0], jib[1]], 0.9 * A * gold, 0.9);
+        if (gold < 1) mark([...jib, jib[0], jib[1]], 0.7 * A * (1 - gold), 0.8, null);
+        // This visit's mark on the mainsail.
+        if (mainLeech && gold > 0.5 && z > S * 0.03) {
+          const across = (u) => { const [lx, ly] = mainLeech(u); return [...P(luff - 0.03, ly), ...P(lx + 0.04, ly)]; };
+          if (deco === 1) { for (const u of [0.3, 0.48]) mark(across(u), A * gold, 1.6, 'bg'); }
+          else if (deco === 2 && !o.welcome) {
+            const [lx, ly] = mainLeech(0.28), [cx, cy] = P((luff + lx) / 2, ly);
+            texts.push({ text: String(b.v.visits ?? 1), x: cx, y: cy, size: z * 0.13, align: 'center', alpha: A * gold, accent: 'bg', role: 'sailno' });
+          } else if (deco === 3) {
+            const [lx, ly] = mainLeech(0.42), [cx, cy] = P((luff + lx) / 2, ly);
+            circles.push({ x: cx, y: cy, r: z * 0.05, fill: true, alpha: A * gold, accent: 'bg' });
+          }
+        }
+      }
+    }
+    // A pennant at the masthead, streaming downwind (whichever way the boat is heading).
+    if (hoist > 0.5) {
+      const [px, py] = P(kind === 'schooner' ? -0.12 : 0, mastTop - 0.02);
+      const flap = live ? Math.sin(t * (5 + 3 * hash(b.h, 34, 7)) + b.h) * z * 0.03 : 0, len = z * (0.16 + 0.08 * hash(b.h, 35, 7));
+      const swallow = hash(b.h, 36, 7) < 0.4;
+      const flag = swallow
+        ? [px, py, px + wdir * len, py + z * 0.02 + flap, px + wdir * len * 0.65, py + z * 0.045 + flap * 0.6, px + wdir * len, py + z * 0.07 + flap, px, py + z * 0.08]
+        : [px, py, px + wdir * len, py + z * 0.04 + flap, px, py + z * 0.08];
+      shape(flag, gold > 0.5 ? 'fg' : 'bg', A * (gold > 0.5 ? 0.85 : 0.9));
+      if (gold <= 0.5) mark([...flag, flag[0], flag[1]], 0.6 * A, 0.7, null);
+    }
+    if (!b.leaving && !b.ghost) {
       mark([X - 0.36 * z, Y + 0.12 * z, X + 0.3 * z, Y + 0.12 * z], 0.5 * A, 0.8);
       mark([X - 0.2 * z, Y + 0.24 * z, X + 0.14 * z, Y + 0.24 * z], 0.3 * A, 0.8);
     }
-    if (b.v.name && !o.welcome && byDay && b.hoist > 0.9 && b.labelFade > 0.02) labels.push({ x: X, y: Y - z * 0.55, hx: b.hx, hy: b.hy, h: b.h, v: b.v, r0: z * 0.72 + cap * 0.3, sail: true, fade: b.labelFade });
+    if (b.v.name && !o.welcome && byDay && hoist > 0.9 && b.labelFade > 0.02) labels.push({ x: X, y: Y - z * 0.55, hx: b.hx, hy: b.hy, h: b.h, v: b.v, r0: z * 0.72 + cap * 0.3, sail: true, fade: b.labelFade });
   }
 
   // Gulls by day, a few, gliding across with the wind (none in rain or under a grey sky).
@@ -765,6 +938,8 @@ export function compose(c, o = {}) {
   const glints = [];
   if (moonMark && dark && moonMark.fraction > 0.2) glints.push(...column(moonMark.x, 1, 0.35 + 0.65 * moonMark.fraction, 'moon', 20));
   if (!byDay) for (const d of dots.filter((x) => x.hero).slice(0, 3)) glints.push(...column(d.x, d.reveal, starsA, 'here', hashString(String(d.v.id)) % 97));
+  // Guests who are here: their star's light lies faintly on the water too, broken up by the waves.
+  if (!byDay && dark) for (const d of dots.filter((x) => x.here && !x.hero && x.dep == null).slice(0, 8)) glints.push(...column(d.x, 0.45, 0.3 * starsA, 'here', hashString(String(d.v.id)) % 89).map((g) => ({ ...g, alpha: 0.55, weight: g.weight * 0.6 })));
 
   if (o.captions !== false) {
     const portrait = W < H * 1.3;

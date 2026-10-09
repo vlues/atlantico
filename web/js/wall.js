@@ -5,8 +5,10 @@
 import { compose, hashString, STYLES } from '../lib/art.js';
 import { sunPosition } from '../lib/sun.js';
 import { moonPosition } from '../lib/moon.js';
-import { paint, arrival, revealAt, tourOverlay, farewellOverlay, musicOverlay } from './paint.js';
-import { enableSound, wakeSound, soundWanted, arrivalSound, stopSound } from './sound.js';
+import { paint, arrival, revealAt, tourOverlay, farewellOverlay, musicOverlay, band } from './paint.js';
+import { enableSound, wakeSound, soundWanted, arrivalSound, stopSound, surpriseSound } from './sound.js';
+import { recipe } from '../lib/surprise.js';
+import { drawSurprise, moments } from './surprise.js';
 import { screen } from './screen.js';
 
 const API = window.ATLANTICO?.api ?? '';
@@ -20,10 +22,11 @@ let shown = { key: null };
 let visit = null; // the welcome being played: { start, until, w, starts: Map(id → when its star's entrance began) }
 let stop = null;  // the tour stop being shown: { key, start, until, tour }
 let note = null;  // a brief line on the wall ("sonido") after a tap
-// Guests who were here at the last look, and those leaving now (their exit plays for 8 seconds).
+// Guests who were here at the last look, and those leaving now: their exit plays for 8 seconds, then
+// by day their boat carries on out of the bay for a few minutes before joining the others far out.
 let present = null;
 const leaving = new Map();
-const EXIT_MS = 8000;
+const EXIT_MS = 8000, AFTER_MS = 4 * 60000;
 function track(visitors) {
   const now = new Map(visitors.filter((v) => v.here).map((v) => [v.id, v]));
   if (present) for (const [id, v] of present) if (!now.has(id) && !leaving.has(id)) leaving.set(id, { start: Date.now(), name: v.name, visits: v.visits });
@@ -31,6 +34,7 @@ function track(visitors) {
   present = now;
 }
 let bye = null;   // the goodbye being shown
+let surprise = null; // { id, rec, started }
 let song = null;  // a guest's song that came on: { key, start }
 
 async function refresh() {
@@ -72,7 +76,7 @@ function compFor(s, v, now) {
     date: now + s.dayAhead * 86400000, style: v.style ?? params.get('style') ?? s.style,
     dark: v.dark, visitors: s.visitors, welcome: v.welcome, time: now / 1000,
     heroes: v.starts ? [...v.starts].map(([id, at]) => ({ id, reveal: revealAt((now - at) / 1000), e: (now - at) / 1000 })) : v.hero ? [{ id: v.hero, reveal: 1 }] : [],
-    departing: [...leaving].map(([id, d]) => ({ id, name: d.name, visits: d.visits, p: Math.min(1, (now - d.start) / EXIT_MS) })),
+    departing: [...leaving].map(([id, d]) => ({ id, name: d.name, visits: d.visits, p: Math.min(1, (now - d.start) / EXIT_MS), age: (now - d.start) / 1000 })),
   });
 }
 
@@ -91,7 +95,7 @@ function frame(now) {
 
 function draw() {
   const t = Date.now();
-  for (const [id, d] of leaving) if (t - d.start > EXIT_MS) leaving.delete(id);
+  for (const [id, d] of leaving) if (t - d.start > AFTER_MS) leaving.delete(id);
 
   // Play each welcome from the moment this screen hears about it, for at least 22 s. People who
   // arrive together join the same welcome: each star gets its own entrance, a beat apart, and the
@@ -150,8 +154,22 @@ function draw() {
     if (bye?.key !== `${fw.id}:${fw.at}`) { bye = { key: `${fw.id}:${fw.at}`, start: t }; stopSound('end'); }
     farewellOverlay(ctx, comp, fw, (t - bye.start) / 1000);
   }
+  // A surprise: the same on every screen in the house, grown from the Worker's random seed.
+  const sp = state.surprise;
+  const surprising = sp && t >= sp.at && t < sp.until;
+  if (surprising) {
+    if (surprise?.id !== sp.id) surprise = { id: sp.id, rec: recipe(sp.seed, sp.cx, sp.size, sp.force), started: false };
+    const se = (t - sp.at) / 1000;
+    drawSurprise(ctx, comp, surprise.rec, se);
+    if (surprise.rec.size === 'big' && se < 6) band(ctx, comp, surprise.rec.title.es, surprise.rec.title.en, Math.min(1, se / 1.2) * Math.min(1, (6 - se) / 1.2));
+    if (!surprise.started) {
+      surprise.started = true;
+      surpriseSound(surprise.rec, moments);
+      fetch(`${API}/api/surprise/seen`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ id: sp.id }) }).catch(() => {});
+    }
+  }
   // Night: dim (or go dark) after midnight, unless something is happening in the room.
-  const dim = display.night(t, !!(playing || touring || singing != null || (fw && fw.until > t)));
+  const dim = display.night(t, !!(playing || touring || singing != null || surprising || (fw && fw.until > t)));
   if (dim > 0) { ctx.save(); ctx.globalAlpha = dim; ctx.fillStyle = '#000'; ctx.fillRect(0, 0, canvas.width, canvas.height); ctx.restore(); }
   display.shift(t);
   if (note && t < note.until) {

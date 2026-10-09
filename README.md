@@ -18,6 +18,25 @@ A quiet smart-apartment system for a flat in Fuentebravía (El Puerto de Santa M
     - By day the sun hides the stars, as in life. Guests who are here are **sails on the bay** instead, heeling with the real wind, and a few gulls drift across.
     - At dusk the sails go in as the stars come out.
     - A daytime arrival is a wake crossing the bay and a sail being hoisted; a night arrival is a shooting star.
+  - **Every guest is their own.**
+    - Boats come in five kinds (sloop, catamaran, lateen *falucho*, schooner, gaff cutter), each with its own pennant. The mainsail changes each visit: stripes, their visit number, an emblem, or plain.
+    - Stars come in six kinds (sparkle, diffraction cross, six-point, ringed, binary pair, haloed), each twinkling at its own pace. Regulars grow extra rays and a halo.
+  - **Physics of the water and the air.**
+    - Boats ride the real swell: they pitch along the slope of the wave beneath them, heel with the wind and roll in time with the wave period.
+    - Stars twinkle more in wind and low over the horizon, and a guest's star lays a faint reflection on the waves.
+    - Everything moves smoothly and always drifts back to its place.
+  - **Guests never quite leave.**
+    - By night their sparkle settles into their quiet star, which stays on the wall.
+    - By day their boat sails out of the bay and its gold fades to white. From then on it's one of the small white sails that pass by far out, a few at a time.
+    - Deleted guests do vanish, since that is what deleting asks for.
+  - **Surprises, never the same twice.**
+    - The Worker rolls real random dice (`crypto.getRandomValues`) every 15 minutes, from 08:00 to midnight. That's about five big surprises a day (more with guests here) and small ones most hours, each at a random moment.
+    - Every screen in the house plays the same surprise at the same instant.
+    - Each surprise is grown from a random seed:
+      - one to three elements (dolphins, a whale, a four-masted ship, a regatta, starlings, a diving gull, flying fish, kites, balloons, a sun pillar, a rainbow, meteors, a comet, fireworks with reflections, sky lanterns, the lighthouse, an aurora, jellyfish, glowing waves, a moonbow, a new constellation named after a guest who is here, a message in a bottle, a golden wave);
+      - each with its own count, path, depth, speed, size, colour and timing;
+      - plus how the sea and sky answer, a melody (mode, key, tempo, timbre), a light pattern for the lamps, and a name, such as *Delfines y un cometa · Dolphins and a comet*.
+    - **Demo → Surprises** plays one now (random, small, or led by any element).
   - **The sky is live.**
     - The moon appears with its real phase and position, and lights a path on the water at night.
     - Weather is drawn like an engraving's sky, and drifts with the real wind:
