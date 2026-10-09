@@ -21,7 +21,7 @@ function wordsAlpha(t, e, i = 0) {
 
 /** Draw a composition. `e` = seconds into an arrival (null when there is none). */
 export function paint(ctx, comp, alpha = 1, e = null) {
-  const p = comp.dark ? PALETTE.dark : PALETTE.light;
+  const p = comp.palette ?? (comp.dark ? PALETTE.dark : PALETTE.light);
   const col = (a) => (a && p[a]) || p.fg;
   const sw = Math.max(0.7, Math.min(comp.width, comp.height) / 1100);
   ctx.save();
@@ -30,17 +30,36 @@ export function paint(ctx, comp, alpha = 1, e = null) {
   ctx.fillRect(0, 0, comp.width, comp.height);
   ctx.lineCap = 'round';
   ctx.lineJoin = 'round';
+  // Strokes that look alike are drawn as one path: thousands of short strokes stay smooth.
+  const groups = new Map();
   for (const l of comp.lines) {
+    const key = `${l.alpha.toFixed(2)}|${l.weight ?? 1}|${l.accent ?? ''}|${l.dash ? l.dash.map((v) => v.toFixed(1)).join(',') : l.dotted ? 'dot' : ''}`;
+    let g = groups.get(key);
+    if (!g) groups.set(key, (g = { l, list: [] }));
+    g.list.push(l.pts);
+  }
+  for (const { l, list } of groups.values()) {
     ctx.globalAlpha = alpha * l.alpha;
     ctx.strokeStyle = col(l.accent);
     ctx.lineWidth = sw * (l.weight ?? 1);
-    ctx.setLineDash(l.dotted ? [sw, sw * 5] : []);
+    ctx.setLineDash(l.dash ? [Math.max(0.01, l.dash[0]), l.dash[1]] : l.dotted ? [sw, sw * 5] : []);
     ctx.beginPath();
-    ctx.moveTo(l.pts[0], l.pts[1]);
-    for (let k = 2; k < l.pts.length; k += 2) ctx.lineTo(l.pts[k], l.pts[k + 1]);
+    for (const pts of list) {
+      ctx.moveTo(pts[0], pts[1]);
+      for (let k = 2; k < pts.length; k += 2) ctx.lineTo(pts[k], pts[k + 1]);
+    }
     ctx.stroke();
   }
   ctx.setLineDash([]);
+  for (const sh of comp.shapes ?? []) {
+    ctx.globalAlpha = alpha * sh.alpha;
+    ctx.fillStyle = col(sh.accent);
+    ctx.beginPath();
+    ctx.moveTo(sh.pts[0], sh.pts[1]);
+    for (let k = 2; k < sh.pts.length; k += 2) ctx.lineTo(sh.pts[k], sh.pts[k + 1]);
+    ctx.closePath();
+    ctx.fill();
+  }
   ctx.lineWidth = sw;
   for (const c of comp.circles) {
     ctx.globalAlpha = alpha * c.alpha;
@@ -77,12 +96,22 @@ export function paint(ctx, comp, alpha = 1, e = null) {
   ctx.restore();
 }
 
-/** The shooting star and the ignition, drawn over a composition that has a `hero`. */
-export function arrival(ctx, comp, e) {
+// A small deterministic random, so each arrival (seeded by when it happened) flies its own path.
+const rnd = (seed, k) => {
+  let h = Math.imul((seed | 0) ^ Math.imul(k, 0x9e3779b1), 0x85ebca6b);
+  h = Math.imul(h ^ (h >>> 13), 0xc2b2ae35);
+  return ((h ^ (h >>> 16)) >>> 0) / 4294967296;
+};
+
+/**
+ * The shooting star and the ignition, drawn over a composition that has a `hero`.
+ * `seed` makes every arrival its own: where the meteor comes from, how it curves, how many rings.
+ */
+export function arrival(ctx, comp, e, seed = 0) {
   const h = comp.hero;
   if (!h || e == null || e > LAND_S + 3.4) return;
   const W = comp.width, H = comp.height, S = Math.min(W, H);
-  const gold = (comp.dark ? PALETTE.dark : PALETTE.light).here;
+  const gold = (comp.palette ?? (comp.dark ? PALETTE.dark : PALETTE.light)).here;
   const sw = Math.max(0.7, S / 1100);
   ctx.save();
   ctx.strokeStyle = ctx.fillStyle = ctx.shadowColor = gold;
@@ -90,9 +119,10 @@ export function arrival(ctx, comp, e) {
   // A meteor from the far side of the sky, slowing as it arrives.
   const t0 = 0.25;
   if (e > t0 && e < LAND_S + 0.05) {
-    const dir = h.x < W / 2 ? 1 : -1;
-    const P0 = { x: h.x + dir * W * 0.42, y: h.y - H * 0.3 };
-    const C = { x: (P0.x + h.x) / 2 + dir * S * 0.06, y: (P0.y + h.y) / 2 - S * 0.08 };
+    const dir = rnd(seed, 1) < 0.75 ? (h.x < W / 2 ? 1 : -1) : (h.x < W / 2 ? -1 : 1);
+    const reach = 0.25 + 0.3 * rnd(seed, 2), rise = 0.18 + 0.2 * rnd(seed, 3), bow = (rnd(seed, 4) - 0.3) * 0.2;
+    const P0 = { x: h.x + dir * W * reach, y: h.y - H * rise };
+    const C = { x: (P0.x + h.x) / 2 + dir * S * bow, y: (P0.y + h.y) / 2 - S * (0.03 + 0.08 * rnd(seed, 5)) };
     const at = (u) => ({
       x: (1 - u) * (1 - u) * P0.x + 2 * u * (1 - u) * C.x + u * u * h.x,
       y: (1 - u) * (1 - u) * P0.y + 2 * u * (1 - u) * C.y + u * u * h.y,
@@ -130,7 +160,8 @@ export function arrival(ctx, comp, e) {
       ctx.fillStyle = g;
       ctx.beginPath(); ctx.arc(h.x, h.y, r, 0, Math.PI * 2); ctx.fill();
     }
-    for (let i = 0; i < 3; i++) {
+    const rings = 2 + Math.floor(rnd(seed, 6) * 3);
+    for (let i = 0; i < rings; i++) {
       const k = clamp01((k0 - i * 0.35) / 2.6);
       if (k <= 0 || k >= 1) continue;
       ctx.globalAlpha = (1 - k) * (1 - k) * 0.6;

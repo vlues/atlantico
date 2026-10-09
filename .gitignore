@@ -7,3 +7,5 @@ firmware/**/build/
 firmware/.pio/
 firmware/out/
 web/firmware/*.bin
+web/version.json
+web/firmware/ota.json

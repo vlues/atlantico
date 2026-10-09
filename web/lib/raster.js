@@ -1,15 +1,97 @@
 // Rasterize a composition for e-ink panels and encode it (PNG or raw packed bits).
 // Everything is drawn as anti-aliased coverage first, then reduced to the panel's inks with a
 // clean threshold — crisp lines and real serif type, no dither noise. No dependencies.
-import { textContours } from './type.js';
+import { textGlyphs } from './type.js';
+
+// Non-zero polygon coverage with 4×4 subsampling and an active-edge list.
+// Calls emit(x, y, coverage) for every touched pixel inside a W×H frame.
+function scan(contours, W, H, emit) {
+  const edges = [];
+  let minY = Infinity, maxY = -Infinity, minX = Infinity, maxX = -Infinity;
+  for (const c of contours) {
+    for (let k = 0; k < c.length; k += 2) {
+      const ax = c[k], ay = c[k + 1], bx = c[(k + 2) % c.length], by = c[(k + 3) % c.length];
+      if (ay === by) continue;
+      const e = ay < by ? { y0: ay, y1: by, x: ax, dx: (bx - ax) / (by - ay), dir: 1 } : { y0: by, y1: ay, x: bx, dx: (ax - bx) / (ay - by), dir: -1 };
+      edges.push(e);
+      minY = Math.min(minY, e.y0); maxY = Math.max(maxY, e.y1);
+      minX = Math.min(minX, ax, bx); maxX = Math.max(maxX, ax, bx);
+    }
+  }
+  if (!edges.length) return;
+  edges.sort((a, b) => a.y0 - b.y0);
+  const y0 = Math.max(0, Math.floor(minY)), y1 = Math.min(H - 1, Math.ceil(maxY));
+  const rx0 = Math.max(0, Math.floor(minX)), rx1 = Math.min(W - 1, Math.ceil(maxX));
+  if (rx1 < rx0) return;
+  const row = new Float32Array(W);
+  const active = [], xs = [];
+  let next = 0;
+  for (let py = y0; py <= y1; py++) {
+    row.fill(0, rx0, rx1 + 1);
+    let any = false;
+    for (let s = 0; s < 4; s++) {
+      const sy = py + (s + 0.5) / 4;
+      while (next < edges.length && edges[next].y0 <= sy) active.push(edges[next++]);
+      let n = 0;
+      for (const e of active) if (e.y1 > sy) active[n++] = e;
+      active.length = n;
+      if (n < 2) continue;
+      xs.length = 0;
+      for (const e of active) xs.push([e.x + (sy - e.y0) * e.dx, e.dir]);
+      xs.sort((a, b) => a[0] - b[0]);
+      let wind = 0;
+      for (let k = 0; k < xs.length - 1; k++) {
+        wind += xs[k][1];
+        if (!wind) continue;
+        const a = Math.max(0, xs[k][0]), b = Math.min(W, xs[k + 1][0]);
+        if (b <= a) continue;
+        any = true;
+        for (let sx = Math.floor(a * 4); sx < Math.ceil(b * 4); sx++) {
+          const lo = Math.max(a, sx / 4), hi = Math.min(b, (sx + 1) / 4);
+          if (hi > lo) row[sx >> 2] += (hi - lo) * 4 / 16;
+        }
+      }
+    }
+    if (any) for (let px = rx0; px <= rx1; px++) if (row[px] > 0) emit(px, py, Math.min(1, row[px]));
+  }
+}
+
+// Rendered glyphs are kept per size and quarter-pixel offset: a warm Worker reuses them, so
+// re-rendering the wall (every few minutes, the same captions) costs almost nothing for type.
+const glyphCache = new WeakMap();
+function glyphCoverage(g, k, fx, fy) {
+  let m = glyphCache.get(g);
+  if (!m) glyphCache.set(g, (m = new Map()));
+  const id = `${k.toFixed(5)}|${fx}|${fy}`;
+  let cov = m.get(id);
+  if (!cov) {
+    const contours = g.contours.map((c) => c.map((v, j) => (j % 2 ? fy / 4 + v * k : fx / 4 + v * k)));
+    let x0 = Infinity, y0 = Infinity, x1 = -Infinity, y1 = -Infinity;
+    for (const c of contours) for (let j = 0; j < c.length; j += 2) {
+      x0 = Math.min(x0, c[j]); x1 = Math.max(x1, c[j]); y0 = Math.min(y0, c[j + 1]); y1 = Math.max(y1, c[j + 1]);
+    }
+    if (!contours.length || x0 === Infinity) cov = { bx: 0, by: 0, w: 0, h: 0, a: new Float32Array(0) };
+    else {
+      const bx = Math.floor(x0), by = Math.floor(y0), w = Math.ceil(x1) - bx + 1, h = Math.ceil(y1) - by + 1;
+      const a = new Float32Array(w * h);
+      scan(contours.map((c) => c.map((v, j) => (j % 2 ? v - by : v - bx))), w, h, (px, py, v) => { a[py * w + px] = v; });
+      cov = { bx, by, w, h, a };
+    }
+    m.set(id, cov);
+  }
+  return cov;
+}
 
 // Spectra 6 / ACeP-style 6-colour panels. Index = value in the raw file (firmware maps to native codes).
 export const SIX = [
   [0, 0, 0], [255, 255, 255], [230, 200, 0], [190, 30, 30], [30, 60, 160], [40, 120, 60],
 ];
 
-/** @returns {{w:number,h:number,px:Uint8Array,colors:number}} px holds palette indices */
-export function rasterize(comp, colors = 2) {
+/**
+ * @returns {{w:number,h:number,px:Uint8Array,colors:number,cov?:Float32Array,tint?:Uint8Array}} px holds palette
+ *   indices; with { coverage: true } the anti-aliased coverage and tint are returned too (for icons).
+ */
+export function rasterize(comp, colors = 2, opts = {}) {
   const w = comp.width, h = comp.height;
   const cov = new Float32Array(w * h); // ink coverage 0..1
   const tint = new Uint8Array(w * h);  // 0 ink, 1 sun accent, 2 accent for guests who are here
@@ -39,54 +121,27 @@ export function rasterize(comp, colors = 2) {
     }
   };
 
-  // Non-zero polygon fill with 4×4 subsampling (for type and filled dots).
-  const fill = (contours, t) => {
-    let minY = Infinity, maxY = -Infinity, minX = Infinity, maxX = -Infinity;
-    const edges = [];
-    for (const c of contours) {
-      for (let k = 0; k < c.length; k += 2) {
-        const ax = c[k], ay = c[k + 1];
-        const bx = c[(k + 2) % c.length], by = c[(k + 3) % c.length];
-        if (ay === by) continue;
-        edges.push(ay < by ? [ax, ay, bx, by, 1] : [bx, by, ax, ay, -1]);
-        minY = Math.min(minY, ay); maxY = Math.max(maxY, ay);
-        minX = Math.min(minX, ax); maxX = Math.max(maxX, ax);
-      }
-    }
-    if (!edges.length) return;
-    const y0 = Math.max(0, Math.floor(minY)), y1 = Math.min(h - 1, Math.ceil(maxY));
-    const rx0 = Math.max(0, Math.floor(minX)), rx1 = Math.min(w - 1, Math.ceil(maxX));
-    const row = new Float32Array(w);
-    for (let py = y0; py <= y1; py++) {
-      row.fill(0, rx0, rx1 + 1);
-      let any = false;
-      for (let s = 0; s < 4; s++) {
-        const sy = py + (s + 0.5) / 4;
-        const xs = [];
-        for (const e of edges) {
-          if (sy >= e[1] && sy < e[3]) xs.push([e[0] + ((sy - e[1]) / (e[3] - e[1])) * (e[2] - e[0]), e[4]]);
-        }
-        if (xs.length < 2) continue;
-        xs.sort((a, b) => a[0] - b[0]);
-        let wind = 0;
-        for (let k = 0; k < xs.length - 1; k++) {
-          wind += xs[k][1];
-          if (!wind) continue;
-          const a = Math.max(0, xs[k][0]), b = Math.min(w, xs[k + 1][0]);
-          if (b <= a) continue;
-          any = true;
-          for (let sx = Math.floor(a * 4); sx < Math.ceil(b * 4); sx++) {
-            const lo = Math.max(a, sx / 4), hi = Math.min(b, (sx + 1) / 4);
-            if (hi > lo) row[sx >> 2] += (hi - lo) * 4 / 16;
-          }
-        }
-      }
-      if (any) for (let px = rx0; px <= rx1; px++) if (row[px] > 0) put(py * w + px, Math.min(1, row[px]), t);
-    }
-  };
+  // Filled polygons (dots, the moon) straight into the frame.
+  const fill = (contours, t) => scan(contours, w, h, (px, py, a) => put(py * w + px, a, t));
 
   for (const l of comp.lines) {
     const p = l.pts;
+    if (l.dash) {
+      // Dashes (and dots, when the dash is zero long) walked along the polyline.
+      const [on, off] = l.dash, period = Math.max(1, on + off);
+      const lw = baseW * (0.55 + 0.45 * l.alpha) * (l.weight ?? 1);
+      const t = tintOf(l.accent);
+      let at = 0;
+      for (let k = 2; k < p.length; k += 2) {
+        const x0 = p[k - 2], y0 = p[k - 1], len = Math.hypot(p[k] - x0, p[k + 1] - y0) || 1e-9;
+        for (let d = (period - (at % period)) % period; d < len; d += period) {
+          const a = d / len, b = Math.min(1, (d + on) / len);
+          seg(x0 + (p[k] - x0) * a, y0 + (p[k + 1] - y0) * a, x0 + (p[k] - x0) * b, y0 + (p[k + 1] - y0) * b, lw, 1, t);
+        }
+        at += len;
+      }
+      continue;
+    }
     if (l.dotted) {
       for (let k = 2; k < p.length; k += 2) {
         const len = Math.hypot(p[k] - p[k - 2], p[k + 1] - p[k - 1]);
@@ -102,6 +157,7 @@ export function rasterize(comp, colors = 2) {
     const t = tintOf(l.accent);
     for (let k = 2; k < p.length; k += 2) seg(p[k - 2], p[k - 1], p[k], p[k + 1], lw, 1, t);
   }
+  for (const sh of comp.shapes ?? []) fill([sh.pts], tintOf(sh.accent));
   for (const c of comp.circles) {
     const t = tintOf(c.accent);
     if (c.fill) {
@@ -119,7 +175,22 @@ export function rasterize(comp, colors = 2) {
   for (const t of comp.texts) {
     // Small sizes use the heavier cut so hairlines survive the 1-bit threshold.
     const key = t.italic ? 'italic' : t.size < 16 * scale ? 'caption' : 'regular';
-    for (const glyph of textContours(t.text, t.x, t.y, t.size, t.align, key)) fill(glyph, tintOf(t.accent));
+    const tint = tintOf(t.accent);
+    for (const gl of textGlyphs(t.text, t.x, t.y, t.size, t.align, key)) {
+      let ix = Math.floor(gl.x), iy = Math.floor(gl.y);
+      let fx = Math.round((gl.x - ix) * 4), fy = Math.round((gl.y - iy) * 4);
+      if (fx === 4) { ix++; fx = 0; }
+      if (fy === 4) { iy++; fy = 0; }
+      const cov = glyphCoverage(gl.g, gl.k, fx, fy);
+      for (let gy = 0; gy < cov.h; gy++) {
+        const py = iy + cov.by + gy;
+        if (py < 0 || py >= h) continue;
+        for (let gx = 0; gx < cov.w; gx++) {
+          const v = cov.a[gy * cov.w + gx], px = ix + cov.bx + gx;
+          if (v > 0 && px >= 0 && px < w) put(py * w + px, v, tint);
+        }
+      }
+    }
   }
 
   // Reduce to inks.
@@ -129,7 +200,7 @@ export function rasterize(comp, colors = 2) {
   const ink = six ? (comp.dark ? 1 : 0) : comp.dark ? 0 : 1;
   const accent = six ? [ink, 3, comp.dark ? 2 : 4] : [ink, ink, ink];
   for (let i = 0; i < px.length; i++) px[i] = cov[i] >= 0.42 ? accent[tint[i]] : bg;
-  return { w, h, px, colors };
+  return opts.coverage ? { w, h, px, colors, cov, tint } : { w, h, px, colors };
 }
 
 /** Raw bytes for the ESP32. Mono: 1 bit/px, MSB first, 1 = black. Six: 4 bits/px, high nibble first. */

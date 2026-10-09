@@ -22,6 +22,7 @@ static const int COLORS = 6;
 
 RTC_DATA_ATTR char lastVersion[48] = "";
 RTC_DATA_ATTR uint32_t failures = 0;
+RTC_DATA_ATTR uint32_t updateCheckIn = 0;  // seconds until the next firmware check (0 = now)
 
 static uint8_t *image = nullptr;
 static size_t imageCap = 0;
@@ -154,6 +155,12 @@ void setup() {
 
 void loop() {
   uint32_t next = update();
+  // Once a day, while Wi-Fi is up anyway, look for newer firmware (restarts into it if found).
+  if (updateCheckIn == 0 && atl::paired() && WiFi.status() == WL_CONNECTED) {
+    updateCheckIn = 86400;
+    atl::updateFirmware();
+  }
+  updateCheckIn -= min(updateCheckIn, next);
   if (batteryMode()) {
     WiFi.disconnect(true);
     esp_deep_sleep((uint64_t)next * 1000000ULL);

@@ -10,6 +10,12 @@
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:ital,wght@0,300;0,400;1,300&family=Inter:wght@200;300;400&display=swap" rel="stylesheet">
   <link rel="stylesheet" href="css/base.css">
+  <link rel="manifest" href="manifest.webmanifest">
+  <link rel="apple-touch-icon" href="icons/apple-touch-icon.png">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-title" content="Atlántico">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
   <style>
     #login { min-height: 100svh; display: grid; place-items: center; padding: 16px; }
     #login form { display: grid; gap: 28px; width: min(320px, 100%); text-align: center; }
@@ -49,6 +55,7 @@
       <input type="password" id="pass" autocomplete="current-password" placeholder="passcode" required>
       <div><button class="btn" type="submit">Open</button></div>
       <div class="small" id="loginerr" style="color:var(--warn);min-height:1.4em"></div>
+      <p class="meta" style="margin:0">Once per device. This browser stays signed in.</p>
     </form>
   </div>
 
@@ -59,7 +66,7 @@
         <a class="btn quiet small" href="wall" target="_blank" rel="noopener">Wall ↗</a>
         <a class="btn quiet small" href="hola" target="_blank" rel="noopener">Guest page ↗</a>
         <a class="btn quiet small" href="add">Add device</a>
-        <button class="btn quiet small" id="logout">Lock</button>
+        <button class="btn quiet small" id="logout">Sign out</button>
       </div>
     </header>
 
@@ -73,7 +80,8 @@
         </div>
       </div>
       <div class="preview" id="preview"><iframe src="wall" title="Wall piece"></iframe></div>
-      <p class="source" id="source" style="margin-top:12px"></p>
+      <p class="source" id="edition" style="margin-top:12px"></p>
+      <p class="source" id="source" style="margin-top:4px"></p>
     </section>
 
     <section>
@@ -91,6 +99,7 @@
       <p class="small muted" style="margin:0 0 22px" id="demonote"></p>
       <div class="row"><span class="label">Sea</span><div class="chips" id="d-sea"></div></div>
       <div class="row"><span class="label">Time of day</span><div class="chips" id="d-sun"></div></div>
+      <div class="row"><span class="label">Daily style</span><div class="chips" id="d-style"></div></div>
       <div class="row"><span class="label">Guest arrives</span>
         <input type="text" id="d-name" placeholder="Lucía" maxlength="24" style="width:140px" title="A name already on the wall arrives as a returning guest">
         <button class="btn small" id="d-arrive">Ring the bell</button>
@@ -139,6 +148,12 @@
     <section>
       <h2>Connections</h2>
       <div class="list" id="connections"></div>
+    </section>
+
+    <section>
+      <h2>Signed in <small>each browser signs in once and stays signed in</small></h2>
+      <div class="list" id="sessions"></div>
+      <div class="row" style="margin-top:18px"><button class="btn small" id="signout-all">Sign out everywhere</button></div>
     </section>
   </div>
 

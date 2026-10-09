@@ -1,8 +1,10 @@
 // Live wall piece: fetches state from the Worker and draws the composition on a canvas,
 // redrawn slowly so the lines drift. Light/dark and welcome changes crossfade.
-// A cheap version check every few seconds means an arrival reaches the wall almost at once.
-import { compose } from '../lib/art.js';
+// A cheap version check every few seconds means an arrival reaches the wall almost at once,
+// and a new release of the site reloads the page by itself.
+import { compose, hashString } from '../lib/art.js';
 import { sunPosition } from '../lib/sun.js';
+import { moonPosition } from '../lib/moon.js';
 import { paint, arrival, revealAt } from './paint.js';
 
 const API = window.ATLANTICO?.api ?? '';
@@ -38,10 +40,12 @@ function resize() {
   canvas.height = Math.round(innerHeight * dpr);
 }
 
+let moon = { at: 0 };
 function compFor(s, dark, welcome, now, e) {
   const sun = s.simulate && params.get('sun') ? JSON.parse(params.get('sun')) : sunPosition(new Date(now), s.lat, s.lon);
-  return compose({ ...s.conditions, sun }, {
-    width: canvas.width, height: canvas.height, lat: s.lat, lon: s.lon,
+  if (now - moon.at > 60000) moon = { at: now, pos: moonPosition(new Date(now), s.lat, s.lon) };
+  return compose({ ...s.conditions, sun, moon: moon.pos }, {
+    width: canvas.width, height: canvas.height, lat: s.lat, lon: s.lon, date: now, style: params.get('style') ?? s.style,
     dark, visitors: s.visitors, welcome, hero: welcome?.id, reveal: welcome ? revealAt(e) : 1, time: now / 1000,
   });
 }
@@ -72,7 +76,19 @@ function frame(now) {
   }
   const comp = compFor(state, dark, welcome, t, e);
   paint(ctx, comp, shown.prev ? f * f * (3 - 2 * f) : 1, e);
-  if (playing) arrival(ctx, comp, e);
+  if (playing) arrival(ctx, comp, e, hashString(playing.key));
+}
+
+// A wall runs for months: when a new version of the site is published, pick it up.
+let release = null;
+async function checkRelease() {
+  try {
+    const r = await fetch(`version.json?t=${Date.now()}`, { cache: 'no-store' });
+    if (!r.ok) return;
+    const { sha } = await r.json();
+    if (release && sha !== release) location.reload();
+    release = sha;
+  } catch { /* offline */ }
 }
 
 addEventListener('resize', resize);
@@ -81,4 +97,6 @@ await refresh();
 canvas.classList.add('fade-in');
 setInterval(params.get('scenario') ? refresh : poll, params.get('scenario') ? 60000 : 4000);
 setInterval(refresh, 5 * 60000); // weather and visitors, even if nothing announced a change
+checkRelease();
+setInterval(checkRelease, 10 * 60000);
 requestAnimationFrame(frame);

@@ -99,8 +99,9 @@
   <script src="vendor/qrcode-generator-1.4.4.js"></script>
   <script type="module">
     import { api, drift } from './js/api.js';
-    import { compose, welcomeLine } from './lib/art.js';
+    import { compose, welcomeLine, hashString } from './lib/art.js';
     import { sunPosition } from './lib/sun.js';
+    import { moonPosition } from './lib/moon.js';
     import { paint, arrival, revealAt } from './js/paint.js';
 
     drift(document.querySelector('.drift'), { lines: 10, alpha: 0.06 });
@@ -200,12 +201,12 @@
         if (canvas.width !== w) { canvas.width = w; canvas.height = h; }
         const e = (now - start) / 1000;
         // Composed taller than shown, so the sky gets most of the frame and the sea just shows.
-        const comp = compose({ ...c, sun: sunPosition(new Date(), lat, lon) }, {
-          width: w, height: Math.round(w * 1.15), dark: true, captions: false,
+        const comp = compose({ ...c, sun: sunPosition(new Date(), lat, lon), moon: moonPosition(new Date(), lat, lon) }, {
+          width: w, height: Math.round(w * 1.15), dark: true, captions: false, date: Date.now(), style: state?.style,
           visitors, hero: v.id, reveal: revealAt(e), time: Date.now() / 1000, lat, lon,
         });
         paint(ctx, comp, 1, null);
-        arrival(ctx, comp, e);
+        arrival(ctx, comp, e, hashString(`${v.id}:${start}`));
         if (e < 90 && !reduce) requestAnimationFrame(draw);
       };
       requestAnimationFrame(draw);

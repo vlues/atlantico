@@ -3,6 +3,7 @@
 #include <WiFiClientSecure.h>
 #include <HTTPClient.h>
 #include <Preferences.h>
+#include <Update.h>
 #include "root_cas.h"
 
 namespace atl {
@@ -311,6 +312,59 @@ bool tryPair() {
   store.code = "";
   save();
   Serial.printf("ATLANTICO PAIRED %s\n", store.deviceId.c_str());
+  return true;
+}
+
+// ── Firmware updates ─────────────────────────────────────────────────────────
+// The Worker answers 204 when this build is current, or says where the newer image is. The image
+// comes through the Worker too, so the same pinned certificates cover it, and is checked by MD5
+// before the device switches to it. A failed or interrupted download leaves the old firmware.
+bool updateFirmware() {
+  Response r;
+  int st = request("GET", String("/api/device/firmware?env=") + FW_ENV + "&build=" + FW_BUILD, "", r);
+  if (st != 200) return false;
+  JsonDocument d;
+  if (deserializeJson(d, r.body)) return false;
+  String path = d["path"] | "";
+  int size = d["size"] | 0;
+  String md5 = d["md5"] | "";
+  if (!path.length() || size <= 0) return false;
+  Serial.printf("ATLANTICO UPDATE to build %d (%d bytes)\n", (int)(d["build"] | 0), size);
+
+  String url = store.api + path;
+  WiFiClientSecure tls;
+  WiFiClient plain;
+  HTTPClient http;
+  http.setTimeout(30000);
+  bool ok;
+  if (url.startsWith("https://")) {
+    tls.setCACert(ROOT_CAS);
+    ok = http.begin(tls, url);
+  } else {
+    ok = http.begin(plain, url);
+  }
+  if (!ok) return false;
+  http.addHeader("Authorization", "Bearer " + store.token);
+  if (http.GET() != 200 || http.getSize() != size) {
+    http.end();
+    return false;
+  }
+  if (!Update.begin(size)) {
+    Serial.printf("ATLANTICO ERROR update: %s\n", Update.errorString());
+    http.end();
+    return false;
+  }
+  if (md5.length()) Update.setMD5(md5.c_str());
+  size_t written = Update.writeStream(*http.getStreamPtr());
+  http.end();
+  if (written != (size_t)size || !Update.end(true)) {
+    Serial.printf("ATLANTICO ERROR update: %s\n", Update.errorString());
+    Update.abort();
+    return false;
+  }
+  Serial.println("ATLANTICO UPDATED, restarting");
+  delay(300);
+  ESP.restart();
   return true;
 }
 

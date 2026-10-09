@@ -30,16 +30,45 @@ function timingSafeEqual(a: string, b: string): boolean {
 const bearer = (req: Request) => req.headers.get('authorization')?.replace(/^Bearer\s+/i, '') ?? '';
 
 /** Owner check. Returns an error Response, or null when the caller is the owner. */
+/** A session stays valid for this long after it was last used: sign in once, stay signed in. */
+export const SESSION_MS = 400 * 86400000;
+
+/**
+ * Owner check: Bearer <session token> (what browsers keep) or the passcode itself (scripts, curl).
+ * Ten wrong tries from one address lock it out for an hour.
+ */
 export async function requireOwner(req: Request, env: Env): Promise<Response | null> {
   const ip = req.headers.get('cf-connecting-ip') ?? 'local';
   const failKey = `authfail:${ip}`;
   const fails = Number((await env.STATE.get(failKey)) ?? 0);
   if (fails >= 10) return json({ error: 'too many attempts, try again in an hour' }, 429);
   const token = bearer(req);
-  if (env.OWNER_TOKEN && token && timingSafeEqual(await sha256(token), await sha256(env.OWNER_TOKEN))) return null;
+  if (token.startsWith('s1.')) {
+    const h = await sha256(token);
+    const row = await env.DB.prepare('SELECT last_used FROM sessions WHERE token_hash = ?').bind(h).first<{ last_used: number }>();
+    if (row && row.last_used > now() - SESSION_MS) {
+      if (now() - row.last_used > 86400000) await env.DB.prepare('UPDATE sessions SET last_used = ? WHERE token_hash = ?').bind(now(), h).run();
+      return null;
+    }
+  } else if (env.OWNER_TOKEN && token && timingSafeEqual(await sha256(token), await sha256(env.OWNER_TOKEN))) return null;
   await env.STATE.put(failKey, String(fails + 1), { expirationTtl: 3600 });
   return json({ error: 'owner passcode required' }, 401);
 }
+
+/** Swap the passcode for a session token this browser keeps. The passcode itself is never stored. */
+export async function signIn(req: Request, env: Env): Promise<Response> {
+  const b = await body<{ passcode?: string; label?: string }>(req);
+  const check = new Request(req.url, { headers: { authorization: `Bearer ${b.passcode ?? ''}`, 'cf-connecting-ip': req.headers.get('cf-connecting-ip') ?? 'local' } });
+  if (!b.passcode || b.passcode.startsWith('s1.')) return json({ error: 'owner passcode required' }, 401);
+  const denied = await requireOwner(check, env);
+  if (denied) return denied;
+  const token = `s1.${randomId(32)}`;
+  await env.DB.prepare('INSERT INTO sessions (token_hash, label, created_at, last_used) VALUES (?, ?, ?, ?)')
+    .bind(await sha256(token), String(b.label ?? 'browser').slice(0, 60), now(), now()).run();
+  return json({ token });
+}
+
+export const sessionHash = async (req: Request) => sha256(bearer(req));
 
 /** Device check: Bearer <device token>. Returns the device row or null. */
 export async function deviceFromRequest(req: Request, env: Env): Promise<DeviceRow | null> {

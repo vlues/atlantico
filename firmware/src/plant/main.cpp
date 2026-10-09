@@ -28,6 +28,7 @@ RTC_DATA_ATTR uint64_t pendingAt[8];
 RTC_DATA_ATTR uint8_t pendingN = 0;
 RTC_DATA_ATTR uint32_t dayMl = 0;
 RTC_DATA_ATTR uint64_t dayStartS = 0;
+RTC_DATA_ATTR uint32_t updateCheckIn = 0;  // seconds until the next firmware check (0 = now)
 
 struct Rules {
   float waterBelow = 25, doseMl = 250, minIntervalH = 72, maxDailyMl = 500, fallbackEveryDays = 7, pumpMlPerSec = 25;
@@ -146,6 +147,11 @@ static uint32_t cycle() {
   int st = atl::wifiConnect() ? atl::request("POST", "/api/device/report", body, res) : -1;
   if (st == 200) {
     pendingN = 0;
+    // Once a day, after a good report, look for newer firmware (restarts into it if found).
+    if (updateCheckIn == 0) {
+      updateCheckIn = 86400;
+      atl::updateFirmware();
+    }
     JsonDocument d;
     if (!deserializeJson(d, res.body)) {
       if (!d["rules"].isNull()) { saveRules(d["rules"]); loadRules(); }
@@ -179,6 +185,7 @@ void loop() {
   uint32_t awakeStart = millis();
   uint32_t sleepS = atl::paired() ? cycle() : (offlineRules(readMoisture(), readReservoir()), 1800);
   clockS += (millis() - awakeStart) / 1000 + sleepS;
+  updateCheckIn -= min<uint32_t>(updateCheckIn, sleepS);
   WiFi.disconnect(true);
   esp_deep_sleep((uint64_t)sleepS * 1000000ULL);
 }

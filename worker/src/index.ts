@@ -1,6 +1,6 @@
 import type { Env } from './env';
 import { json, cors, preflight } from './http';
-import { requireOwner, body, setSetting, getSetting, now, logAlert } from './util';
+import { requireOwner, signIn, sessionHash, SESSION_MS, body, setSetting, getSetting, now, logAlert } from './util';
 import { wallState, wallVersion, panelImage, panelPoll, liveSVG, liveHTML, bumpWall, SUN_PRESETS } from './wall';
 import { SCENARIOS } from './weather';
 import { arrive, demoArrive, deleteVisitor, endVisit, listVisitors, guestInfo, cleanName, type WifiSettings } from './guests';
@@ -8,6 +8,9 @@ import { applyScene, saveGovee, SCENES, autoState } from './lights';
 import { plantStatus, listPlants, ensureSeeded, simulatorTick, fastForward, recordReading, type Rules } from './plants';
 import { createPairing, pairingStatus, pair, report, listDevices, updateDevice, removeDevice, offlineAlerts } from './devices';
 import { dailyCheck, telegram } from './check';
+import { firmwareCheck, firmwareImage } from './firmware';
+// @ts-ignore — shared plain-JS module
+import { edition, STYLES } from '../../web/lib/art.js';
 
 export default {
   async fetch(req: Request, env: Env, ctx: ExecutionContext): Promise<Response> {
@@ -57,6 +60,7 @@ on('GET', '/art/live.svg', (_r, env, _c, _m, url) => liveSVG(url, env));
 on('GET', '/art/panel.png', (r, env, _c, _m, url) => panelImage(r, url, env, 'png'));
 on('GET', '/art/panel.bin', (r, env, _c, _m, url) => panelImage(r, url, env, 'bin'));
 on('GET', '/api/guest', (_r, env) => guestInfo(env));
+on('POST', '/api/session', (r, env) => signIn(r, env));
 on('POST', '/api/arrive', (r, env, ctx) => arrive(r, env, ctx));
 on('DELETE', '/api/visitors/:id', (r, env, _c, m) => deleteVisitor(m[1], r, env));
 
@@ -64,6 +68,8 @@ on('DELETE', '/api/visitors/:id', (r, env, _c, m) => deleteVisitor(m[1], r, env)
 on('POST', '/api/pair', (r, env) => pair(r, env));
 on('POST', '/api/device/report', (r, env) => report(r, env));
 on('GET', '/api/panel/poll', (r, env) => panelPoll(r, env));
+on('GET', '/api/device/firmware', (r, env, _c, _m, url) => firmwareCheck(r, env, url));
+on('GET', '/api/device/firmware/([\\w-]+)\\.bin', (r, env, _c, m) => firmwareImage(r, env, m[1]));
 
 // ── Owner ────────────────────────────────────────────────────────────────────
 on('GET', '/api/overview', async (_r, env) => overview(env), 'owner');
@@ -132,6 +138,21 @@ on('POST', '/api/check', async (_r, env) => json(await dailyCheck(env)), 'owner'
 on('POST', '/api/telegram/test', async (_r, env) =>
   json({ sent: await telegram(env, 'Atlántico: test message. Alerts will arrive here.') }), 'owner');
 on('POST', '/api/demo', (r, env, ctx) => demo(r, env, ctx), 'owner');
+// Signed-in browsers: list them, sign this one out, or sign out everywhere.
+on('GET', '/api/sessions', async (r, env) => {
+  const mine = await sessionHash(r);
+  const rows = await env.DB.prepare('SELECT token_hash, label, created_at, last_used FROM sessions WHERE last_used > ? ORDER BY last_used DESC')
+    .bind(now() - SESSION_MS).all<any>();
+  return json(rows.results.map(({ token_hash, ...s }) => ({ ...s, current: token_hash === mine })));
+}, 'owner');
+on('DELETE', '/api/session', async (r, env) => {
+  await env.DB.prepare('DELETE FROM sessions WHERE token_hash = ?').bind(await sessionHash(r)).run();
+  return json({ ok: true });
+}, 'owner');
+on('DELETE', '/api/sessions', async (_r, env) => {
+  await env.DB.prepare('DELETE FROM sessions').run();
+  return json({ ok: true });
+}, 'owner');
 
 async function route(req: Request, url: URL, env: Env, ctx: ExecutionContext): Promise<Response> {
   for (const [method, re, h, access] of routes) {
@@ -158,8 +179,9 @@ async function overview(env: Env) {
     getSetting<WifiSettings | null>(env, 'wifi', null), getSetting(env, 'greeting', 'Bienvenido'),
     getSetting<any>(env, 'govee', null),
   ]);
+  const today = edition(Date.now(), wall.style);
   return json({
-    wall: { ...wall, visitors: wall.visitors.length },
+    wall: { ...wall, visitors: wall.visitors.length, edition: { n: today.n, label: today.label, style: today.style, palette: today.palette.name } },
     scenes: Object.entries(SCENES).map(([id, s]) => ({ id, label: s.label })),
     autoState: autoState(env),
     lights: lightsLast,
@@ -177,6 +199,8 @@ async function overview(env: Env) {
       scenarios: ['live', ...Object.keys(SCENARIOS)],
       sun: wall.sunOverride ?? 'live',
       suns: ['live', ...Object.keys(SUN_PRESETS)],
+      style: wall.style ?? 'today',
+      styles: ['today', ...STYLES],
       offline: JSON.parse((await env.STATE.get('demo:offline')) ?? '[]'),
     },
   });
@@ -194,6 +218,11 @@ async function demo(req: Request, env: Env, ctx: ExecutionContext): Promise<Resp
     case 'sun':
       if (b.value === 'live' || !SUN_PRESETS[b.value]) await env.STATE.delete('demo:sun');
       else await env.STATE.put('demo:sun', b.value);
+      await bumpWall(env);
+      return json({ ok: true });
+    case 'style':
+      if (!STYLES.includes(b.value)) await env.STATE.delete('demo:style');
+      else await env.STATE.put('demo:style', b.value);
       await bumpWall(env);
       return json({ ok: true });
     case 'arrive': {

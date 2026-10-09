@@ -10,6 +10,7 @@ LAT = "36.5986"
 LON = "-6.2797"
 PANEL_SIZES = "800x480,1600x1200,1304x984,640x384"
 PAGES_ORIGIN = "https://vlues.github.io"
+SITE_URL = "https://vlues.github.io/atlantico"
 
 [[kv_namespaces]]
 binding = "STATE"

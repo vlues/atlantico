@@ -45,10 +45,101 @@ export function windName(speed, dir) {
   return null;
 }
 
+// ── Editions ─────────────────────────────────────────────────────────────────
+// Every day is a new numbered edition: its own drawing style, palette, horizon and grain, so the
+// same sea never looks the same twice. Consecutive days never share a style or a palette.
+
+export const STYLES = ['lineas', 'puntos', 'bandas', 'horizonte', 'trazo'];
+export const STYLE_NAMES = { lineas: 'Líneas', puntos: 'Puntos', bandas: 'Bandas', horizonte: 'Horizonte', trazo: 'Trazo' };
+
+// Screen palettes (e-ink always uses its own inks). Each has a paper and a night version.
+export const PALETTES = [
+  { name: 'Cal', light: { bg: '#f2f0eb', fg: '#141414', here: '#8a6524' }, dark: { bg: '#0a0a0b', fg: '#e9e6df', here: '#e2bf7e' } },
+  { name: 'Arena', light: { bg: '#efe6d8', fg: '#2a221c', here: '#9b5a26' }, dark: { bg: '#13100d', fg: '#ecdfcb', here: '#e9b679' } },
+  { name: 'Bruma', light: { bg: '#e7ebea', fg: '#1b282c', here: '#7b5a1c' }, dark: { bg: '#0a1114', fg: '#d9e3e3', here: '#e0c690' } },
+  { name: 'Salina', light: { bg: '#f3ede8', fg: '#3a2b28', here: '#9a4430' }, dark: { bg: '#110c0c', fg: '#eee2dc', here: '#e69d7f' } },
+  { name: 'Pizarra', light: { bg: '#e8e8e4', fg: '#22252a', here: '#6f5a26' }, dark: { bg: '#0d0f12', fg: '#e3e5e9', here: '#d9c28b' } },
+  { name: 'Índigo', light: { bg: '#edeff4', fg: '#1b2240', here: '#8a6a2a' }, dark: { bg: '#090c19', fg: '#e0e4f2', here: '#ebc57e' } },
+];
+
+const EPOCH = Date.UTC(2026, 9, 8); // edition Nº 1
+const DAYS_ES = ['domingo', 'lunes', 'martes', 'miércoles', 'jueves', 'viernes', 'sábado'];
+const MONTHS_ES = ['enero', 'febrero', 'marzo', 'abril', 'mayo', 'junio', 'julio', 'agosto', 'septiembre', 'octubre', 'noviembre', 'diciembre'];
+const TZ = 'Europe/Madrid';
+let dayFmt = null, clockFmt = null;
+
+/** The calendar day in Cádiz for a moment in time. */
+export function localDay(ms) {
+  dayFmt ??= new Intl.DateTimeFormat('en-CA', { timeZone: TZ, year: 'numeric', month: '2-digit', day: '2-digit' });
+  const [y, m, d] = dayFmt.format(new Date(ms)).split('-').map(Number);
+  return { y, m, d, dow: new Date(Date.UTC(y, m - 1, d)).getUTCDay() };
+}
+
+/** 24-hour clock time in Cádiz. */
+export function clock(ms) {
+  clockFmt ??= new Intl.DateTimeFormat('en-GB', { timeZone: TZ, hour: '2-digit', minute: '2-digit', hourCycle: 'h23' });
+  return clockFmt.format(new Date(ms));
+}
+
+function shuffled(list, seed) {
+  const a = [...list];
+  for (let i = a.length - 1; i > 0; i--) {
+    const j = Math.floor(hash(i, seed, 97) * (i + 1));
+    [a[i], a[j]] = [a[j], a[i]];
+  }
+  return a;
+}
+
+// Each cycle uses every item once in a fresh order; the seam between cycles never repeats.
+function rotation(list, day, salt) {
+  const n = list.length, c = Math.floor(day / n), k = ((day % n) + n) % n;
+  const order = shuffled(list, c * 31 + salt), prev = shuffled(list, (c - 1) * 31 + salt);
+  if (order[0] === prev[n - 1]) [order[0], order[1]] = [order[1], order[0]];
+  return order[k];
+}
+
+/** The edition for a moment in time (or with its style forced, for previews). */
+export function edition(ms = Date.now(), style = null) {
+  const { y, m, d, dow } = localDay(ms);
+  const day = Math.round((Date.UTC(y, m - 1, d) - EPOCH) / 86400000);
+  const st = STYLES.includes(style) ? style : rotation(STYLES, day, 1);
+  const h = (k) => hash(day, k, 2026);
+  return {
+    n: day + 1, day, style: st, palette: rotation(PALETTES, day, 2),
+    seed: 7 + day * 13,
+    horizon: st === 'horizonte' ? 0.5 + 0.04 * h(1) : 0.32 + 0.07 * h(1),
+    margin: 0.07 + 0.03 * h(2),
+    density: 0.85 + 0.3 * h(3),
+    grain: h(4),
+    label: `Nº ${day + 1} · ${STYLE_NAMES[st]} · ${DAYS_ES[dow]} ${d} de ${MONTHS_ES[m - 1]}`,
+  };
+}
+
+/** The lit part of the moon as a polygon: limb on the sunward side, terminator back. */
+function moonShape(x, y, r, phase) {
+  const side = phase < 0.5 ? 1 : -1;
+  const tx = Math.cos(phase * TAU);
+  const pts = [];
+  for (let k = 0; k <= 24; k++) { const a = -Math.PI / 2 + (Math.PI * k) / 24; pts.push(x + side * r * Math.cos(a), y + r * Math.sin(a)); }
+  for (let k = 24; k >= 0; k--) { const a = -Math.PI / 2 + (Math.PI * k) / 24; pts.push(x + side * r * tx * Math.cos(a), y + r * Math.sin(a)); }
+  return pts;
+}
+
+/** Sea temperature, the tide and the moon, as a caption. */
+export function liveLine(c) {
+  const parts = [];
+  if (c.seaTemp != null) parts.push(`sea ${Math.round(c.seaTemp)} °C`);
+  if (c.nextTide) parts.push(`tide ${c.tideTrend ? `${c.tideTrend}, ` : ''}${c.nextTide.type} at ${clock(Date.parse(c.nextTide.at))}`);
+  if (c.moon && c.moon.fraction > 0.02) parts.push(`moon ${Math.round(c.moon.fraction * 100)} % ${c.moon.waxing ? 'waxing' : 'waning'}`);
+  return parts.join(' · ');
+}
+
 /**
  * @param {object} c conditions: waveHeight m, wavePeriod s, waveDirection °, windSpeed km/h,
- *   windDirection ° (from), tide m (sea level vs mean), sun {altitude, azimuth}
- * @param {object} o width, height, dark, time (s, for drift), seed, print (bitmap), captions (default true),
+ *   windDirection ° (from), tide m (sea level vs mean), sun {altitude, azimuth}, moon (moonPosition),
+ *   seaTemp °C, tideTrend, nextTide, cloudCover %, precipitation mm
+ * @param {object} o width, height, dark, time (s, for drift), print (bitmap), captions (default true),
+ *   date (ms; picks the edition) or edition, style (force one), seed,
  *   visitors [{id, visits, here, name}], hero (id of the star being welcomed), reveal (0..1, its entrance),
  *   welcome {name, greeting, visits, since}
  */
@@ -56,18 +147,23 @@ export function compose(c, o = {}) {
   const W = o.width ?? 1600, H = o.height ?? 1000;
   const S = Math.min(W, H);
   const t = o.time ?? 0;
-  const seed = o.seed ?? 7;
+  const ed = o.edition ?? edition(o.date ?? Date.now(), o.style);
+  const style = ed.style;
+  const seed = o.seed ?? ed.seed;
   const dark = !!o.dark;
+  const pal = dark ? ed.palette.dark : ed.palette.light;
   const lat = o.lat ?? HOME.lat, lon = o.lon ?? HOME.lon;
 
-  const mx = Math.round(W * 0.085);
+  const mx = Math.round(W * ed.margin);
   const fw = W - 2 * mx;
   const tide = clamp(c.tide ?? 0, -2, 2);
-  const horizon = H * 0.36 - tide * H * 0.03;
+  const horizon = H * ed.horizon - tide * H * 0.03;
   const bottom = H * 0.84;
   const fh = bottom - horizon;
   // Bitmaps (o.print) get fewer, airier lines: they must read at arm's length on paper-like ink.
-  const N = o.lineCount ?? clamp(Math.round(fh / (o.print ? Math.max(6, S * 0.0135) : Math.max(4.2, S * 0.0105))), 22, 90);
+  const spacing = o.print ? Math.max(6, S * 0.0135) : Math.max(4.2, S * 0.0105);
+  let N = o.lineCount ?? clamp(Math.round((fh / spacing) * ed.density), 22, 90);
+  if (style === 'horizonte' && o.lineCount == null) N = clamp(Math.round(N * 0.4), 10, 30);
   const step = o.print ? Math.max(3, W / 260) : Math.max(1.5, W / 420);
 
   // Swell: height drives band contrast, period drives band length, direction tilts the bands.
@@ -80,9 +176,10 @@ export function compose(c, o = {}) {
   const swellAmp = (0.08 + 0.62 * hN) * ((lambda * (N - 1)) / TAU) * 0.9;
   const drift = t / (T * 9);
 
-  // Long undulation along each line.
+  // Long undulation along each line; each edition has its own grain.
   const k2 = clamp(9 / T, 0.7, 2.6);
   const underAmp = 0.12 + 1.8 * Math.pow(hN, 1.3);
+  const grain = 1.5 + 2 * ed.grain;
 
   // Wind: the downwind side lifts like a filled sail; chop roughens the line.
   const ws = c.windSpeed ?? 5;
@@ -92,27 +189,33 @@ export function compose(c, o = {}) {
   const bend = wN * 7;
   const chop = clamp(wN * 0.24, 0, 0.26);
   const bowC = 0.5 - 0.3 * ex;
+  const big = style === 'horizonte' ? 1.7 : 1;
 
-  // Sun, placed as seen from the beach looking out to sea.
+  // Sun and moon, placed as seen from the beach looking out to sea.
+  const place = (body) => ({
+    x: mx + fw * clamp(0.5 + (body.azimuth - HOME.coastFacing) / 120, 0.05, 0.95),
+    y: horizon - (clamp(body.altitude, 0, 55) / 55) * (horizon - H * 0.13),
+  });
   const sun = c.sun ?? { altitude: -10, azimuth: 0 };
   let sunMark = null;
-  if (sun.altitude > -0.5) {
-    const sx = mx + fw * clamp(0.5 + (sun.azimuth - HOME.coastFacing) / 120, 0.05, 0.95);
-    const sy = horizon - (clamp(sun.altitude, 0, 55) / 55) * (horizon - H * 0.12);
-    sunMark = { x: sx, y: sy, r: S * 0.02, alt: sun.altitude };
+  if (sun.altitude > -0.5) sunMark = { ...place(sun), r: S * 0.02 * big, alt: sun.altitude };
+  let moonMark = null;
+  if (c.moon && c.moon.altitude > 0 && sun.altitude < 3 && c.moon.fraction > 0.02) {
+    moonMark = { ...place(c.moon), r: S * 0.019 * big, phase: c.moon.phase, fraction: c.moon.fraction };
   }
 
   const persp = (z) => (z >= 0 ? 0.5 * z + 0.5 * Math.pow(z, 1.5) : 0.5 * z);
-  const lines = [];
+  const rows = []; // the sea, one polyline per line (split where the sun glitters)
   for (let i = 0; i < N; i++) {
     const s = i / (N - 1);
     const env = 0.35 + 0.65 * s;
-    let cur = [];
-    const flush = () => { if (cur.length >= 4) lines.push({ pts: cur, alpha: 0.45 + 0.55 * Math.min(1, s * 3), row: s }); cur = []; };
+    let cur = [], ph = [];
+    const flush = () => { if (cur.length >= 4) rows.push({ pts: cur, ph, alpha: 0.45 + 0.55 * Math.min(1, s * 3), row: s }); cur = []; ph = []; };
     for (let x = mx; x <= W - mx + 0.01; x += step) {
       const u = (x - mx) / fw;
-      let d = swellAmp * env * Math.sin(TAU * ((s * Math.cos(r) + u * Math.sin(r) * (fw / fh)) / lambda - drift));
-      d += underAmp * env * Math.sin(TAU * (u * k2 + s * 0.45 - drift * 0.6) + noise(u * 2, s * 2, seed) * 1.2);
+      const swell = Math.sin(TAU * ((s * Math.cos(r) + u * Math.sin(r) * (fw / fh)) / lambda - drift));
+      let d = swellAmp * env * swell;
+      d += underAmp * env * Math.sin(TAU * (u * k2 + s * 0.45 - drift * 0.6) + noise(u * grain, s * 2, seed) * 1.2);
       const bu = 2 * (u - bowC);
       d -= bend * Math.abs(ex) * (0.6 - Math.min(1, bu * bu)) * (0.55 + 0.45 * s);
       d += bend * ny * (u - 0.5) * 0.9;
@@ -128,20 +231,82 @@ export function compose(c, o = {}) {
         }
       }
       cur.push(x, y);
+      ph.push(swell);
     }
     flush();
   }
 
+  // The day's style: the same sea, drawn another way.
+  const lines = [];
+  for (const l of rows) {
+    const base = { alpha: l.alpha, row: l.row };
+    if (style === 'puntos') {
+      // Stipple: round dots, larger and further apart toward the viewer.
+      lines.push({ ...base, pts: l.pts, weight: 1.3 + 1.8 * l.row, dash: [0, S * (0.0055 + 0.011 * l.row)] });
+    } else if (style === 'bandas') {
+      // The swell as bands of light: lines break on the backs of the waves; bigger sea, wider gaps.
+      const thr = -0.65 + 0.7 * hN;
+      let seg = [];
+      for (let q = 0; q < l.ph.length; q++) {
+        if (l.ph[q] > thr) seg.push(l.pts[2 * q], l.pts[2 * q + 1]);
+        else { if (seg.length >= 4) lines.push({ ...base, pts: seg, weight: 1.2 }); seg = []; }
+      }
+      if (seg.length >= 4) lines.push({ ...base, pts: seg, weight: 1.2 });
+    } else if (style === 'trazo') {
+      // Calligraphic: the stroke swells on the faces of the waves.
+      for (let q = 0; q + 1 < l.ph.length; q += 4) {
+        const end = Math.min(l.ph.length - 1, q + 4);
+        const slope = Math.abs(l.pts[2 * end + 1] - l.pts[2 * q + 1]) / Math.max(1, l.pts[2 * end] - l.pts[2 * q]);
+        const w = 0.45 + 0.8 * l.row + 1.3 * Math.max(0, l.ph[q]) + 5 * slope;
+        lines.push({ ...base, pts: l.pts.slice(2 * q, 2 * end + 2), weight: Math.round(clamp(w, 0.45, 3.4) * 4) / 4 });
+      }
+    } else if (style === 'horizonte') {
+      lines.push({ ...base, pts: l.pts, weight: 1.6 + 0.6 * l.row });
+    } else {
+      lines.push({ ...base, pts: l.pts });
+    }
+  }
+
+  // Weather in the sky, live: clouds as stacked strokes drifting with the wind, rain slanting with it.
+  const sky = { x0: mx, x1: W - mx, y0: H * 0.1, y1: horizon - S * 0.05 };
+  const weather = [];
+  const nClouds = Math.round(clamp((c.cloudCover ?? 0) / 100, 0, 1) * 7);
+  for (let k = 0; k < nClouds; k++) {
+    const L = S * (0.1 + 0.16 * hash(k, 1, seed + 5));
+    const span = fw + L;
+    const moved = o.print ? 0 : t * (2 + ws * 0.15) * (ex >= 0 ? 1 : -1);
+    const cx = mx - L / 2 + ((((hash(k, 2, seed + 5) * span + moved) % span) + span) % span);
+    const cy = sky.y0 + (sky.y1 - S * 0.02 - sky.y0) * Math.pow(hash(k, 3, seed + 5), 0.6);
+    for (let j = 0; j < 3; j++) {
+      const len = L * [1, 0.7, 0.42][j], x0 = Math.max(mx, cx - len / 2 + L * 0.08 * j), x1 = Math.min(W - mx, cx + len / 2 + L * 0.08 * j);
+      if (x1 - x0 > S * 0.01) weather.push({ pts: [x0, cy + j * S * 0.008, x1, cy + j * S * 0.008], alpha: 0.42 - 0.1 * j, weight: 0.9 });
+    }
+  }
+  const rain = c.precipitation ?? 0;
+  if (rain > 0.05) {
+    const n = Math.round(clamp(rain / 2, 0.15, 1) * (o.print ? 50 : 130));
+    const len = S * 0.022, slant = clamp(ex * (0.15 + wN), -0.7, 0.7), range = horizon - H * 0.08;
+    for (let k = 0; k < n; k++) {
+      const x = mx + hash(k, 7, seed) * fw;
+      const y = H * 0.08 + ((hash(k, 8, seed) * range + (o.print ? 0 : t * S * 0.3)) % range);
+      weather.push({ pts: [x, y, x + slant * len, y + len], alpha: 0.4, weight: 0.75 });
+    }
+  }
+
   const circles = [];
+  const shapes = [];
   if (sunMark && sunMark.y > H * 0.08) {
     circles.push({ x: sunMark.x, y: sunMark.y, r: sunMark.r, fill: dark, alpha: 0.9, accent: 'sun' });
+  }
+  if (moonMark) {
+    circles.push({ x: moonMark.x, y: moonMark.y, r: moonMark.r, fill: false, alpha: 0.3, accent: 'moon' });
+    shapes.push({ pts: moonShape(moonMark.x, moonMark.y, moonMark.r, moonMark.phase), alpha: 0.95, accent: 'moon' });
   }
 
   // Visitors: one star each, placed deterministically in the sky by id. Regulars burn a little
   // brighter; guests who are here right now sparkle and carry their name.
   const reveal = clamp(o.reveal ?? 1, 0, 1);
   const grow = 1 - Math.pow(1 - reveal, 3);
-  const sky = { x0: mx, x1: W - mx, y0: H * 0.1, y1: horizon - S * 0.05 };
   const stars = [];
   let heroAt = null; // where the welcomed star is, even before it has appeared (screens animate toward it)
   for (const v of o.visitors ?? []) {
@@ -149,13 +314,13 @@ export function compose(c, o = {}) {
     const px = sky.x0 + (sky.x1 - sky.x0) * hash(h, 1, 11);
     const py = sky.y0 + (sky.y1 - sky.y0) * Math.pow(hash(h, 2, 13), 0.8);
     if (sunMark && Math.hypot(px - sunMark.x, py - sunMark.y) < sunMark.r * 2.5) continue;
+    if (moonMark && Math.hypot(px - moonMark.x, py - moonMark.y) < moonMark.r * 2.2) continue;
     const hero = o.hero != null && v.id === o.hero;
     if (hero) heroAt = { x: px, y: py };
     if (hero && reveal < 0.02) continue; // still on its way in
     stars.push({ x: px, y: py, h, v, hero, here: !!v.here || hero });
   }
   const hero = stars.find((d) => d.hero) ?? null;
-
   // Typography.
   const cap = o.print ? Math.max(9.5, S * 0.019) : Math.max(9, S * 0.017);
   const textW = (str, size) => [...str].length * size * 0.62; // close enough for Cormorant
@@ -224,6 +389,7 @@ export function compose(c, o = {}) {
   const box = (x, y, r, owner) => ({ x0: x - r, x1: x + r, y0: y - r, y1: y + r, owner });
   const placed = block ? [block] : [];
   if (sunMark) placed.push(box(sunMark.x, sunMark.y, sunMark.r * 1.6));
+  if (moonMark) placed.push(box(moonMark.x, moonMark.y, moonMark.r * 1.5));
   for (const d of dots) placed.push(box(d.x, d.y, S * (d.hero ? 0.05 : d.here ? 0.026 : 0.007), d));
   for (const d of labels) {
     const hit = (b) => placed.some((p) => p.owner !== d && b.x0 < p.x1 && b.x1 > p.x0 && b.y0 < p.y1 && b.y1 > p.y0);
@@ -244,39 +410,55 @@ export function compose(c, o = {}) {
     }
   }
 
-  // The welcomed star's reflection: a column of glints on the water straight below it,
-  // spreading toward the viewer, drawn in as the star arrives.
-  const glints = [];
-  if (hero) {
-    const shimmer = o.print ? 0 : Math.floor(t * 2.5);
-    for (let k = 0; k < lines.length; k++) {
-      const l = lines[k];
-      if (l.row > reveal * 1.05) continue;
-      if (hash(k, 5, seed + shimmer) > 0.82 - 0.25 * l.row) continue;
-      const half = S * (0.004 + 0.022 * l.row) * (0.45 + hash(k, 6, seed + shimmer));
+  // Reflections: a column of glints on the water straight below a light, spreading toward the
+  // viewer. The welcomed star's is drawn in as it arrives; the moon's follows its brightness.
+  const shimmer = o.print ? 0 : Math.floor(t * 2.5);
+  const column = (x, reach, strength, accent, salt) => {
+    const out = [];
+    for (let k = 0; k < rows.length; k++) {
+      const l = rows[k];
+      if (l.row > reach * 1.05) continue;
+      if (hash(k, 5 + salt, seed + shimmer) > (0.82 - 0.25 * l.row) * strength) continue;
+      const half = Math.max(step * 1.6, S * (0.004 + 0.022 * l.row) * (0.45 + hash(k, 6 + salt, seed + shimmer)) * (accent === 'moon' ? big : 1));
       const pts = [];
-      for (let q = 0; q < l.pts.length; q += 2) if (Math.abs(l.pts[q] - hero.x) <= half) pts.push(l.pts[q], l.pts[q + 1]);
-      // On a one-colour panel the glints can only differ from the sea by weight, so they are bolder.
-      if (pts.length >= 4) glints.push({ pts, alpha: 1, weight: (o.print ? 3.6 : 2.2) - l.row, accent: 'here' });
+      for (let q = 0; q < l.pts.length; q += 2) if (Math.abs(l.pts[q] - x) <= half) pts.push(l.pts[q], l.pts[q + 1]);
+      // On a one-colour panel glints can only differ from the sea by weight, so they are bolder.
+      if (pts.length >= 4) out.push({ pts, alpha: 1, weight: (o.print ? 3.6 : 2.2) - l.row, accent });
+    }
+    return out;
+  };
+  const glints = [];
+  if (moonMark && dark && moonMark.fraction > 0.2) glints.push(...column(moonMark.x, 1, 0.35 + 0.65 * moonMark.fraction, 'moon', 20));
+  if (hero) glints.push(...column(hero.x, reveal, 1, 'here', 0));
+
+  if (o.captions !== false) {
+    const portrait = W < H * 1.3;
+    const top = H * 0.075, by = H - H * 0.06;
+    texts.unshift({ text: 'Atlántico', x: mx, y: top, size: cap * 1.25, align: 'left', italic: false, alpha: 0.9 });
+    texts.push(portrait
+      ? { text: ed.label, x: mx, y: top + cap * 2, size: cap, align: 'left', italic: true, alpha: 0.7 }
+      : { text: ed.label, x: W - mx, y: top, size: cap, align: 'right', italic: true, alpha: 0.7 });
+    const wName = windName(ws, c.windDirection ?? 0);
+    const sea = `swell ${(c.waveHeight ?? 0).toFixed(1)} m · ${Math.round(T)} s · ${compass(c.waveDirection ?? 0)}` +
+      `    wind ${Math.round(ws)} km/h ${compass(c.windDirection ?? 0)}${wName && wName !== 'calma' ? ` (${wName})` : ''}`;
+    const live = liveLine(c);
+    const coords = `${dms(lat, 'N', 'S')}  ${dms(lon, 'E', 'W')}`;
+    if (portrait) {
+      const rowsUp = live ? 2 : 1;
+      texts.push({ text: coords, x: mx, y: by - cap * 2.1 * rowsUp, size: cap, align: 'left', alpha: 0.7 });
+      texts.push({ text: sea, x: mx, y: by - (live ? cap * 2.1 : 0), size: cap, align: 'left', alpha: 0.7 });
+      if (live) texts.push({ text: live, x: mx, y: by, size: cap, align: 'left', alpha: 0.7 });
+    } else {
+      texts.push({ text: coords, x: mx, y: by, size: cap, align: 'left', alpha: 0.7 });
+      texts.push({ text: sea, x: W - mx, y: by - (live ? cap * 1.8 : 0), size: cap, align: 'right', alpha: 0.7 });
+      if (live) texts.push({ text: live, x: W - mx, y: by, size: cap, align: 'right', alpha: 0.7 });
     }
   }
 
-  if (o.captions !== false) {
-    texts.unshift({ text: 'Atlántico', x: mx, y: H * 0.075, size: cap * 1.25, align: 'left', italic: false, alpha: 0.9 });
-    const wName = windName(ws, c.windDirection ?? 0);
-    texts.push({
-      text: `${dms(lat, 'N', 'S')}  ${dms(lon, 'E', 'W')}`,
-      x: mx, y: H - H * 0.06 - (W < H * 1.3 ? cap * 2.2 : 0), size: cap, align: 'left', alpha: 0.7,
-    });
-    texts.push({
-      text: `swell ${(c.waveHeight ?? 0).toFixed(1)} m · ${Math.round(T)} s · ${compass(c.waveDirection ?? 0)}` +
-        `    wind ${Math.round(ws)} km/h ${compass(c.windDirection ?? 0)}${wName && wName !== 'calma' ? ` (${wName})` : ''}`,
-      x: W < H * 1.3 ? mx : W - mx, y: H - H * 0.06, size: cap, align: W < H * 1.3 ? 'left' : 'right', alpha: 0.7,
-    });
-  }
-
   return {
-    width: W, height: H, dark, lines: [...links, ...lines, ...glints, ...sparks], circles, texts, horizon,
+    width: W, height: H, dark, horizon, edition: { n: ed.n, style, label: ed.label, palette: ed.palette.name },
+    palette: { ...pal, visitor: pal.fg, sun: pal.fg, moon: pal.fg },
+    lines: [...weather, ...links, ...lines, ...glints, ...sparks], shapes, circles, texts,
     hero: heroAt,
   };
 }
@@ -313,27 +495,33 @@ export function welcomeLine(w, c = {}, lang = 'es') {
   return [visit, since].filter(Boolean).join(' · ');
 }
 
+/** The classic palette (Cal), for anything drawn without a composition. */
 export const PALETTE = {
-  light: { bg: '#f2f0eb', fg: '#141414', sun: '#141414', visitor: '#141414', here: '#8a6524' },
-  dark: { bg: '#0a0a0b', fg: '#e9e6df', sun: '#e9e6df', visitor: '#e9e6df', here: '#e2bf7e' },
+  light: { ...PALETTES[0].light, sun: PALETTES[0].light.fg, visitor: PALETTES[0].light.fg },
+  dark: { ...PALETTES[0].dark, sun: PALETTES[0].dark.fg, visitor: PALETTES[0].dark.fg },
 };
 
 const esc = (s) => s.replace(/[&<>"]/g, (ch) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' })[ch]);
 
 /** SVG string — used by the Worker's live view. */
 export function toSVG(comp) {
-  const p = comp.dark ? PALETTE.dark : PALETTE.light;
+  const p = comp.palette ?? (comp.dark ? PALETTE.dark : PALETTE.light);
   const sw = Math.max(0.6, Math.min(comp.width, comp.height) / 1000);
   const out = [`<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${comp.width} ${comp.height}" width="100%" height="100%" preserveAspectRatio="xMidYMid meet">`,
     `<rect width="100%" height="100%" fill="${p.bg}"/>`, `<g fill="none" stroke="${p.fg}" stroke-width="${sw}" stroke-linecap="round" stroke-linejoin="round">`];
   const col = (a) => (a && p[a]) || p.fg;
+  const pathOf = (pts) => {
+    let d = `M${pts[0].toFixed(1)} ${pts[1].toFixed(1)}`;
+    for (let k = 2; k < pts.length; k += 2) d += `L${pts[k].toFixed(1)} ${pts[k + 1].toFixed(1)}`;
+    return d;
+  };
   for (const l of comp.lines) {
-    let d = `M${l.pts[0].toFixed(1)} ${l.pts[1].toFixed(1)}`;
-    for (let k = 2; k < l.pts.length; k += 2) d += `L${l.pts[k].toFixed(1)} ${l.pts[k + 1].toFixed(1)}`;
-    const extra = (l.accent ? ` stroke="${col(l.accent)}"` : '') + (l.weight ? ` stroke-width="${(sw * l.weight).toFixed(2)}"` : '');
-    out.push(`<path d="${d}" opacity="${l.alpha.toFixed(2)}"${extra}${l.dotted ? ` stroke-dasharray="1 ${sw * 4}"` : ''}/>`);
+    const extra = (l.accent ? ` stroke="${col(l.accent)}"` : '') + (l.weight ? ` stroke-width="${(sw * l.weight).toFixed(2)}"` : '') +
+      (l.dash ? ` stroke-dasharray="${l.dash[0].toFixed(1)} ${l.dash[1].toFixed(1)}"` : l.dotted ? ` stroke-dasharray="1 ${sw * 4}"` : '');
+    out.push(`<path d="${pathOf(l.pts)}" opacity="${l.alpha.toFixed(2)}"${extra}/>`);
   }
   out.push('</g>');
+  for (const sh of comp.shapes ?? []) out.push(`<path d="${pathOf(sh.pts)}Z" fill="${col(sh.accent)}" opacity="${sh.alpha}"/>`);
   for (const c of comp.circles) {
     out.push(`<circle cx="${c.x.toFixed(1)}" cy="${c.y.toFixed(1)}" r="${c.r.toFixed(1)}" opacity="${c.alpha}" ${c.fill ? `fill="${col(c.accent)}"` : `fill="none" stroke="${col(c.accent)}" stroke-width="${sw}"`}/>`);
   }

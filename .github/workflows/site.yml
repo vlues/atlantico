@@ -25,10 +25,15 @@ jobs:
           path: ~/.platformio
           key: pio-${{ hashFiles('firmware/platformio.ini') }}
       - run: pip install platformio==6.2.0 esptool==5.5.0
-      - run: pio run -d firmware
-      - run: bash firmware/merge.sh firmware/out
+      - name: Build (stamped with this run's number; devices update to newer builds)
+        env:
+          PLATFORMIO_BUILD_FLAGS: -DFW_BUILD=${{ github.run_number }}
+        run: pio run -d firmware
+      - env:
+          FW_BUILD: ${{ github.run_number }}
+        run: bash firmware/merge.sh firmware/out
       - uses: actions/upload-artifact@v4
-        with: { name: firmware, path: firmware/out/*.bin }
+        with: { name: firmware, path: 'firmware/out/*' }
 
   pages:
     needs: firmware
@@ -38,11 +43,15 @@ jobs:
       - uses: actions/checkout@v4
       - uses: actions/download-artifact@v4
         with: { name: firmware, path: web/firmware }
-      - name: Point the site at the Worker
+      - name: Point the site at the Worker, stamp the release
         env:
           API: ${{ vars.ATLANTICO_API }}
+          SHA: ${{ github.sha }}
+          BUILD: ${{ github.run_number }}
         run: |
           printf "window.ATLANTICO = { api: '%s', simulate: false };\n" "$API" > web/config.js
+          printf '{ "sha": "%s", "build": %s }\n' "$SHA" "$BUILD" > web/version.json
+          sed -i "s/\"version\": \"[^\"]*\"/\"version\": \"1.0.$BUILD\"/" web/firmware/*.json
       - uses: actions/configure-pages@v5
       - uses: actions/upload-pages-artifact@v3
         with: { path: web }

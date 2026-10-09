@@ -9,6 +9,8 @@ import { compose, toSVG } from '../../web/lib/art.js';
 import { rasterize, encodePNG, packRaw } from '../../web/lib/raster.js';
 // @ts-ignore
 import { sunPosition } from '../../web/lib/sun.js';
+// @ts-ignore
+import { moonPosition } from '../../web/lib/moon.js';
 
 /** The arrival moment every screen plays: whose star, which visit, how long since the last. */
 export interface Welcome { id: string; name: string; greeting: string; visits: number; since: number | null; at: number; until: number }
@@ -17,7 +19,9 @@ export interface Star { id: string; visits: number; here?: boolean; name?: strin
 export interface WallState {
   conditions: Conditions;
   sun: { altitude: number; azimuth: number };
+  moon: { altitude: number; azimuth: number; fraction: number; phase: number; waxing: boolean; name: string; nameEn: string };
   sunOverride: string | null;
+  style: string | null;   // demo: preview one of the daily styles instead of today's
   scene: string;
   dark: boolean;
   visitors: Star[];
@@ -45,9 +49,10 @@ export const SUN_PRESETS: Record<string, { altitude: number; azimuth: number }> 
 export async function wallState(env: Env, scenario?: string | null): Promise<WallState> {
   const lat = Number(env.LAT), lon = Number(env.LON);
   const t = Date.now();
-  const [demoScenario, sunOverride, scene, welcome, rows] = await Promise.all([
+  const [demoScenario, sunOverride, style, scene, welcome, rows] = await Promise.all([
     env.STATE.get('demo:scenario'),
     env.STATE.get('demo:sun'),
+    env.STATE.get('demo:style'),
     env.STATE.get('scene'),
     getSetting<Welcome | null>(env, 'welcome', null),
     env.DB.prepare('SELECT id, first_name, visits, last_seen, left_at FROM visitors ORDER BY created_at').all<any>()
@@ -60,7 +65,8 @@ export async function wallState(env: Env, scenario?: string | null): Promise<Wal
   const active = welcome && welcome.until > t ? welcome : null;
   const s = scene ?? 'auto';
   return {
-    conditions, sun, sunOverride: sunOverride && SUN_PRESETS[sunOverride] ? sunOverride : null,
+    conditions, sun, moon: moonPosition(new Date(t), lat, lon), style,
+    sunOverride: sunOverride && SUN_PRESETS[sunOverride] ? sunOverride : null,
     scene: s, lat, lon, visitors, welcome: active,
     dark: !!active || DARK_SCENES.has(s) || sun.altitude < -2,
   };
@@ -82,8 +88,8 @@ export async function wallVersion(env: Env): Promise<string> {
 }
 
 function composeFor(state: WallState, width: number, height: number, overrides: { dark?: boolean } = {}, print = false) {
-  return compose({ ...state.conditions, sun: state.sun }, {
-    width, height, print, lat: state.lat, lon: state.lon,
+  return compose({ ...state.conditions, sun: state.sun, moon: state.moon }, {
+    width, height, print, lat: state.lat, lon: state.lon, date: Date.now(), style: state.style,
     dark: overrides.dark ?? state.dark,
     visitors: state.visitors,
     welcome: state.welcome,

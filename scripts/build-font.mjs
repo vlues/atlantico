@@ -5,7 +5,7 @@ import { readFileSync, writeFileSync } from 'node:fs';
 
 const CHARS = [...new Set(
   Array.from({ length: 95 }, (_, i) => String.fromCharCode(32 + i)).join('') +
-  '¡¿ÁÉÍÓÚÜÑáéíóúüñçÇàèìòùâêîôûäëïöÀÈÒ°·–—’‘“”…×',
+  '¡¿ÁÉÍÓÚÜÑáéíóúüñçÇàèìòùâêîôûäëïöÀÈÒ°·–—’‘“”…×ºª',
 )];
 
 function build(file) {

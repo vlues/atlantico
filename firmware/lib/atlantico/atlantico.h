@@ -3,6 +3,14 @@
 #include <Arduino.h>
 #include <ArduinoJson.h>
 
+// Build number from CI; devices install any newer build they are offered.
+#ifndef FW_BUILD
+#define FW_BUILD 0
+#endif
+#define ATL_STR2(x) #x
+#define ATL_STR(x) ATL_STR2(x)
+#define FW_VERSION "1.0." ATL_STR(FW_BUILD)
+
 namespace atl {
 
 struct Stored {
@@ -35,5 +43,9 @@ int request(const char *method, const String &path, const String &json, Response
 
 String mac6();
 int rssi();
+
+// Asks the Worker for a newer firmware build; installs it and restarts if there is one.
+// Returns false when already up to date or when the update could not be completed.
+bool updateFirmware();
 
 }  // namespace atl

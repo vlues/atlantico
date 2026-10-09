@@ -2,14 +2,26 @@
 
 A quiet smart-apartment system for a flat in Fuentebravía (El Puerto de Santa María, Cádiz).
 
-- **The wall piece.** Fine contour lines drawn from the real sea outside: swell, wind, tide and the sun's position. It shows on any screen and on an e-ink frame.
+- **The wall piece.** Fine lines drawn from the real sea outside: swell, wind, tide, sun, moon, clouds and rain. It shows on any screen and on an e-ink frame.
+  - **A new edition every day.** Each midnight (Cádiz time) brings a numbered edition, such as *Nº 12 · Bandas · lunes 19 de octubre*. Each one has:
+    - its own drawing style: *Líneas*, *Puntos* (stipple), *Bandas* (the swell as bands of light), *Horizonte* (a few long lines under a big sky) or *Trazo* (calligraphic);
+    - its own palette, horizon height and grain.
+    - Consecutive days never share a style or a palette.
+  - **The sky is live.**
+    - The moon appears with its real phase and position, and lights a path on the water at night.
+    - Clouds drift with the wind; rain slants with it.
+    - The captions add sea temperature, the tide (rising or falling, and when the next high or low water is) and the moon.
 - **Guest arrival.** Guests tap an NFC tag or scan a QR code and type their first name. Each guest gets their own star in the sky of the wall piece, and the lights go to Hosting. They also get the Wi-Fi.
   - **On arrival:** for 30 seconds, every screen plays the arrival. A shooting star lands on the guest's star, it ignites and reflects on the sea, and their name appears with a personal line. A first visit reads *tu estrella, desde hoy · llegas con levante*; a return reads *tercera visita · la anterior, hace 12 días*.
   - **Remembering guests:** the guest's phone remembers them. Next time, tapping the tag is the whole check-in, with no typing and no buttons.
   - **While they're here:** for six hours after they tap in, their star sparkles in gold with their first name beside it. Regulars' stars burn slightly brighter.
 - **Light scenes.** Hosting, Evening, Focus and Off, plus Auto, which follows sunrise and sunset. A simulator runs today, and Govee bulbs connect with just an API key.
 - **Plants.** There are four: an olive tree, a *Strelitzia nicolai*, a snake plant and a ZZ plant. Each has its own watering rules. Claude checks them every morning and writes one dry line per plant. You only hear about it, via Telegram, when something needs you.
-- **Control page.** Owner only. It shows everything above, plus devices and alerts.
+- **Control page.** Owner only. It shows everything above, plus devices and alerts. You sign in once per browser, and it stays signed in.
+- **Updates itself.**
+  - Push a change and the Worker, site and firmware rebuild.
+  - Wall screens reload themselves when a new version is published.
+  - Panels and plant nodes install new firmware on their own, checking once a day.
 
 Everything runs today with **no hardware**. Each simulated device disappears when its real one pairs.
 
@@ -33,6 +45,7 @@ The **Demo** panel on the control page lets you:
 
 - force a sea state (calm, poniente, levante, storm) or return to **live**
 - pin the sun to sunrise, noon, sunset or night
+- preview any of the daily styles, then return to today's edition
 - "ring the bell" as a guest (a name already on the wall, such as Lucía, arrives as a returning guest)
 - dry out a plant, or empty or refill a reservoir
 - fast-forward the plants a day or a week
@@ -43,8 +56,8 @@ The preview above it switches between the browser view, the black-and-white e-in
 
 ### Live data or simulated?
 
-- **The sea, wind and tide are always live.** They come from Open-Meteo, including in demo mode, unless you pick a sea state in the Demo panel.
-- **The sun is always computed locally** from the date and the flat's coordinates. It's never fetched.
+- **The sea, wind, tide, sea temperature, clouds and rain are always live.** They come from Open-Meteo, including in demo mode, unless you pick a sea state in the Demo panel. The next high or low water is found from the hourly sea-level forecast.
+- **The sun and moon are always computed locally** from the date and the flat's coordinates. They're never fetched.
 - **Devices are simulated** while `SIMULATE=true`: the panel, plant nodes and lights. The simulated soil dries at species-specific rates, faster on the sunny terrace, and the pumps water by the rules. The simulated reservoirs slowly empty.
 
 The control page always says which is which, for example "Live sea and wind · Open-Meteo · updated 4 min ago", or "Demo sea: levante (simulated)".
@@ -111,6 +124,12 @@ Open **Control → Add device** in **Chrome or Edge** on your Mac. Safari can't 
 4. Close the install window and press **Pair**. The page sends a one-time code over the same cable. The panel contacts the Worker and gets its own token, and the simulated panel disappears from the device list.
 
 If Wi-Fi drops, the panel keeps showing the last image. E-paper needs no power to hold a picture.
+
+**Firmware updates are automatic.**
+- Once a day, each panel and plant node asks the Worker whether a newer build exists.
+- If one does, the device downloads it, checks its MD5, installs it and restarts.
+- A failed or interrupted download leaves the old firmware running.
+- Builds are numbered by the GitHub Actions run that made them. The control page shows each device's version.
 
 ### Plant node
 
@@ -230,9 +249,13 @@ GitHub Pages (static)                Cloudflare Worker (TypeScript)           De
 
 ### Sources (checked October 2026)
 
-- **Waves and tide:** Open-Meteo Marine API, `https://marine-api.open-meteo.com/v1/marine`. Fields: `wave_height`, `wave_period`, `wave_direction`, `sea_level_height_msl` (tide relative to mean sea level). Docs: https://open-meteo.com/en/docs/marine-weather-api
-- **Wind:** Open-Meteo Forecast API, `https://api.open-meteo.com/v1/forecast`. Fields: `wind_speed_10m`, `wind_direction_10m`, `wind_gusts_10m`, `temperature_2m`. Docs: https://open-meteo.com/en/docs
+- **Waves, tide and sea temperature:** Open-Meteo Marine API, `https://marine-api.open-meteo.com/v1/marine`.
+  - Current fields: `wave_height`, `wave_period`, `wave_direction`, `sea_level_height_msl` (tide relative to mean sea level) and `sea_surface_temperature`.
+  - Hourly field: `sea_level_height_msl`, for the next high and low water.
+  - Docs: https://open-meteo.com/en/docs/marine-weather-api
+- **Wind, clouds and rain:** Open-Meteo Forecast API, `https://api.open-meteo.com/v1/forecast`. Fields: `wind_speed_10m`, `wind_direction_10m`, `wind_gusts_10m`, `temperature_2m`, `cloud_cover` and `precipitation`. Docs: https://open-meteo.com/en/docs
 - **Sun position:** computed locally in `web/lib/sun.js`, using a low-precision solar ephemeris from the Astronomical Almanac / NOAA. It's accurate to about 0.1°.
+- **Moon position and phase:** computed locally in `web/lib/moon.js`, using low-precision lunar theory (Meeus). It's accurate to about a degree, and was checked against the 8 April 2024 eclipse new moon and the 23 April 2024 full moon.
 - **Govee:** https://developer.govee.com (`openapi.api.govee.com/router/api/v1`)
 - **Improv Wi-Fi Serial:** https://www.improv-wifi.com/serial/
 - **ESP Web Tools 10.4.0:** https://esphome.github.io/esp-web-tools/
@@ -242,6 +265,17 @@ GitHub Pages (static)                Cloudflare Worker (TypeScript)           De
 - **QR codes:** `qrcode-generator` 1.4.4 by Kazuhiko Arase (MIT), vendored in `web/vendor/`.
 
 ---
+
+### Signing in
+
+- **The passcode is typed once per browser.**
+  - The control page swaps the passcode for a session that the browser keeps. The session lasts a year after it was last used, and survives passcode changes.
+  - **Control → Signed in** lists every browser that's signed in.
+  - **Sign out everywhere** ends every session at once. Use it if a phone is lost, or after changing the passcode because it leaked.
+- **Add it to the home screen.** On iPhone: Share › Add to Home Screen.
+  - The control page then opens like an app.
+  - Home-screen apps keep their storage, while Safari tabs lose site data after about a week without a visit. So this is what keeps an iPhone signed in for good.
+  - The wall installs the same way and opens full screen, which suits a tablet on the wall.
 
 ## Maintenance
 

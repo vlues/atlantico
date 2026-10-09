@@ -121,7 +121,8 @@ async function main() {
   const simulate = await yes('Start with simulated devices until real ones pair', state.simulate ?? true);
   state.simulate = simulate;
   saveState();
-  toml = toml.replace(/SIMULATE = ".*"/, `SIMULATE = "${simulate}"`).replace(/PAGES_ORIGIN = ".*"/, `PAGES_ORIGIN = "${pagesOrigin}"`);
+  toml = toml.replace(/SIMULATE = ".*"/, `SIMULATE = "${simulate}"`).replace(/PAGES_ORIGIN = ".*"/, `PAGES_ORIGIN = "${pagesOrigin}"`)
+    .replace(/SITE_URL = ".*"/, `SITE_URL = "${pagesUrl ?? ''}"`);
   writeFileSync(`${root}wrangler.toml`, toml);
 
   step('Deploying the Worker');

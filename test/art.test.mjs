@@ -1,6 +1,10 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { compose, hashString, windName, welcomeLine } from '../web/lib/art.js';
+import { compose as composeAny, hashString, windName, welcomeLine, edition, liveLine, STYLES } from '../web/lib/art.js';
+import { moonPosition } from '../web/lib/moon.js';
+
+// Geometry tests use the classic style; each daily style gets its own tests below.
+const compose = (c, o = {}) => composeAny(c, { style: 'lineas', ...o });
 import { rasterize, encodePNG, packRaw } from '../web/lib/raster.js';
 import { sunPosition, sunTimes } from '../web/lib/sun.js';
 
@@ -116,4 +120,61 @@ test('on a six-colour panel only guests who are here get the accent ink', () => 
   assert.ok(new Set(rasterize(compose(night, { width: 400, height: 240, print: true, visitors: v }), 6).px).has(4), 'blue on a light wall');
   const quiet = new Set(rasterize(compose(night, { width: 400, height: 240, print: true, visitors: [{ id: 'b' }] }), 6).px);
   assert.ok(!quiet.has(2) && !quiet.has(4));
+});
+
+test('a new edition every day: style and palette never repeat on consecutive days', () => {
+  let prev = null;
+  const seen = new Set();
+  for (let d = 0; d < 90; d++) {
+    const e = edition(Date.UTC(2026, 9, 8, 12) + d * 86400000);
+    assert.equal(e.n, d + 1);
+    if (prev) {
+      assert.notEqual(e.style, prev.style, `day ${e.n}`);
+      assert.notEqual(e.palette.name, prev.palette.name, `day ${e.n}`);
+    }
+    seen.add(e.style);
+    prev = e;
+  }
+  assert.equal(seen.size, STYLES.length);
+  assert.match(edition(Date.UTC(2026, 9, 9, 12)).label, /^Nº 2 · \S+ · viernes 9 de octubre$/);
+  assert.equal(edition(Date.UTC(2026, 9, 9, 22, 30)).n, 3, 'the day turns at midnight in Cádiz, not UTC');
+});
+
+test('every daily style draws the same sea differently, on screen and on e-ink', () => {
+  const px = STYLES.map((style) => {
+    const comp = composeAny(calm, { width: 400, height: 240, print: true, style, date: Date.UTC(2026, 9, 9, 12) });
+    assert.equal(comp.edition.style, style);
+    const r = rasterize(comp, 2);
+    const ink = r.px.reduce((n, v) => n + v, 0);
+    assert.ok(ink > 2000, `${style} draws something (${ink} px)`);
+    return r.px;
+  });
+  for (let a = 0; a < px.length; a++) for (let b = a + 1; b < px.length; b++) {
+    let diff = 0;
+    for (let i = 0; i < px[a].length; i++) diff += px[a][i] !== px[b][i];
+    assert.ok(diff > 1500, `${STYLES[a]} vs ${STYLES[b]} differ by ${diff} px`);
+  }
+});
+
+test('the moon: lit by its real phase, and its light on the water at night', () => {
+  const full = moonPosition(new Date('2024-04-23T23:49:00Z'), 36.6, -6.28);
+  assert.ok(full.fraction > 0.99 && full.altitude > 0);
+  const night = { ...calm, sun: { altitude: -30, azimuth: 0 }, moon: full };
+  const comp = compose(night, { width: 800, height: 480, dark: true });
+  assert.equal(comp.shapes.length, 1);
+  assert.ok(comp.lines.filter((l) => l.accent === 'moon').length > 8, 'moonlight glints');
+  const fresh = moonPosition(new Date('2024-04-08T18:21:00Z'), 36.6, -6.28);
+  assert.equal(compose({ ...night, moon: fresh }, { width: 800, height: 480, dark: true }).shapes.length, 0, 'no new moon');
+});
+
+test('clouds and rain come from the live weather', () => {
+  const clear = compose(calm, { width: 800, height: 480 }).lines.length;
+  const grey = compose({ ...calm, cloudCover: 90 }, { width: 800, height: 480 }).lines.length;
+  const wet = compose({ ...calm, cloudCover: 90, precipitation: 3 }, { width: 800, height: 480 }).lines.length;
+  assert.ok(grey > clear && wet > grey + 50, `${clear} ${grey} ${wet}`);
+});
+
+test('the live caption: sea temperature, tide and moon', () => {
+  const line = liveLine({ seaTemp: 22.6, tideTrend: 'rising', nextTide: { type: 'high', at: '2026-10-09T12:37:00Z' }, moon: { fraction: 0.38, waxing: true } });
+  assert.equal(line, 'sea 23 °C · tide rising, high at 14:37 · moon 38 % waxing');
 });

@@ -5,14 +5,28 @@ let data = null;
 let view = 'web';
 let formsFilled = false;
 
-// ── Login ─────────────────────────────────────────────────────────────────────
+// ── Sign in (once per browser) ────────────────────────────────────────────────
+// The passcode is swapped for a session token that this browser keeps for a year after its
+// last use. The passcode itself is never stored.
+const deviceLabel = () => {
+  const ua = navigator.userAgent;
+  const device = /iPhone/.test(ua) ? 'iPhone' : /iPad/.test(ua) ? 'iPad' : /Android/.test(ua) ? 'Android' : /Mac/.test(ua) ? 'Mac' : /Windows/.test(ua) ? 'Windows' : 'Browser';
+  const browser = /Edg\//.test(ua) ? 'Edge' : /Firefox/.test(ua) ? 'Firefox' : /Chrome|CriOS/.test(ua) ? 'Chrome' : /Safari/.test(ua) ? 'Safari' : '';
+  const app = matchMedia('(display-mode: standalone)').matches ? 'home screen' : browser;
+  return [device, app].filter(Boolean).join(' · ');
+};
+const session = (passcode) => api('/api/session', { method: 'POST', body: { passcode, label: deviceLabel() } });
+
 async function unlock() {
   try {
     data = await api('/api/overview', { owner: true });
+    // Signed in with a passcode kept from before sessions existed: swap it for a session.
+    if (!ownerToken.get().startsWith('s1.')) ownerToken.set((await session(ownerToken.get())).token);
     $('login').style.display = 'none';
     $('app').style.display = 'block';
     $('app').classList.add('fade-in');
     render();
+    renderSessions();
     return true;
   } catch (err) {
     if (err.status === 401 || err.status === 429) { ownerToken.clear(); $('loginerr').textContent = err.status === 429 ? err.message : ''; }
@@ -22,10 +36,35 @@ async function unlock() {
 }
 document.querySelector('#login form').addEventListener('submit', async (e) => {
   e.preventDefault();
-  ownerToken.set($('pass').value);
-  if (!(await unlock())) $('loginerr').textContent ||= 'That passcode did not work.';
+  $('loginerr').textContent = '';
+  try {
+    ownerToken.set((await session($('pass').value)).token);
+    $('pass').value = '';
+    await unlock();
+  } catch (err) {
+    $('loginerr').textContent = err.status === 401 ? 'That passcode did not work.' : err.message;
+  }
 });
-$('logout').addEventListener('click', () => { ownerToken.clear(); location.reload(); });
+$('logout').addEventListener('click', async () => {
+  await api('/api/session', { method: 'DELETE', owner: true }).catch(() => {});
+  ownerToken.clear();
+  location.reload();
+});
+
+async function renderSessions() {
+  try {
+    const list = await api('/api/sessions', { owner: true });
+    $('sessions').innerHTML = list.map((x) => `<div><span class="grow">${esc(x.label)} ${x.current ? '<span class="tag">this one</span>' : ''}
+      <div class="small muted">signed in ${new Date(x.created_at).toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' })} · last used ${ago(x.last_used)}</div></span></div>`).join('')
+      || '<div class="muted small">Only the passcode (scripts).</div>';
+  } catch { /* keep the last list */ }
+}
+$('signout-all').addEventListener('click', async () => {
+  if (!confirm('Sign out every browser, including this one? Each will need the passcode once more.')) return;
+  await api('/api/sessions', { method: 'DELETE', owner: true }).catch((err) => toast(err.message));
+  ownerToken.clear();
+  location.reload();
+});
 if (ownerToken.get()) unlock();
 if (window.ATLANTICO?.simulate && !ownerToken.get()) $('pass').placeholder = 'passcode (sim: sim-owner)';
 
@@ -60,6 +99,8 @@ function render() {
 }
 
 function renderSource() {
+  const ed = data.wall.edition;
+  $('edition').textContent = `Today: ${ed.label} · ${ed.palette} palette${data.demo.style !== 'today' ? ' (style previewed from Demo)' : ''} · a new edition every midnight`;
   const c = data.wall.conditions;
   const when = c.fetchedAt ? ago(Date.parse(c.fetchedAt)) : '';
   const src = c.source === 'open-meteo'
@@ -153,6 +194,7 @@ function renderDemo() {
   const d = data.demo;
   chips($('d-sea'), d.scenarios, d.scenario, 'sea');
   chips($('d-sun'), d.suns, d.sun, 'sun');
+  chips($('d-style'), d.styles, d.style, 'style');
   const sel = $('d-plant');
   if (!sel.options.length) sel.innerHTML = data.plants.map((p) => `<option value="${p.id}">${esc(p.name)}</option>`).join('');
   const sims = data.devices.filter((x) => x.simulated).length;
@@ -162,6 +204,7 @@ function renderDemo() {
 }
 $('d-sea').addEventListener('click', (e) => { const v = e.target.dataset.sea; if (v) act('/api/demo', { action: 'scenario', value: v }, `Sea: ${v}`); });
 $('d-sun').addEventListener('click', (e) => { const v = e.target.dataset.sun; if (v) act('/api/demo', { action: 'sun', value: v }, `Sun: ${v}`); });
+$('d-style').addEventListener('click', (e) => { const v = e.target.dataset.style; if (v) act('/api/demo', { action: 'style', value: v }, v === 'today' ? "Back to today's edition" : `Previewing: ${v}`); });
 $('d-arrive').addEventListener('click', () => act('/api/demo', { action: 'arrive', value: $('d-name').value || 'Lucía' },
   (r) => `${r.returning ? `Welcome back, ${r.name} · visit ${r.visits}` : `Welcome, ${r.name} · new star`} · on every screen for 30 s · Hosting scene on`));
 document.querySelectorAll('[data-demo]').forEach((b) => b.addEventListener('click', () =>
