@@ -9,6 +9,7 @@
 //   D10 pump MOSFET gate (logic-level, e.g. IRLZ44N; flyback diode across the pump)
 #include <Arduino.h>
 #include <Wire.h>
+#include <WiFi.h>
 #include <atlantico.h>
 #include <VL53L0X.h>
 #include <OneWire.h>

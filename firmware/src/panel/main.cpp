@@ -4,6 +4,7 @@
 // so if Wi-Fi is down the wall simply keeps showing the last sea.
 #include <Arduino.h>
 #include <SPI.h>
+#include <WiFi.h>
 #include <atlantico.h>
 #include <GxEPD2_BW.h>
 #include <GxEPD2_7C.h>
