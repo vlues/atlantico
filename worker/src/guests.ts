@@ -1,6 +1,6 @@
 // Guest arrival: first name only, rate limited, deletable by the guest.
-// A returning guest is recognised by the key their phone kept, or (if the phone forgot, as Safari
-// does after a week) by confirming they are the same person as an earlier guest with that name.
+// A returning guest is recognised by the key their phone kept or, if the phone forgot (Safari does
+// after a week), by their first name. No questions asked.
 import type { Env } from './env';
 import { json } from './http';
 import { now, randomId, rateLimit, getSetting, setSetting, body } from './util';
@@ -21,16 +21,18 @@ export function cleanName(raw: unknown): string | null {
   if (typeof raw !== 'string') return null;
   const s = raw.normalize('NFC').trim().replace(/\s+/g, ' ');
   if (!/^[\p{L}][\p{L}\p{M}' -]{0,23}$/u.test(s)) return null;
-  return s.split(' ')[0].slice(0, 24); // first name only
+  const first = s.split(' ')[0].slice(0, 24); // first name only
+  return first[0].toLocaleUpperCase('es') + first.slice(1); // "sofia" reads as "Sofia" on the wall
 }
 
 const nameKey = (s: string) => s.normalize('NFD').replace(/\p{M}/gu, '').toLowerCase();
 
-/** The most recent earlier guest with this first name (Lucia = Lucía). */
-async function namesake(env: Env, name: string, includeDemo: boolean): Promise<VisitorRow | null> {
+/** The earlier guest with this first name (Lucia = Lucía): the one this phone last was, else the most recent. */
+async function namesake(env: Env, name: string, includeDemo: boolean, preferId?: string): Promise<VisitorRow | null> {
   const r = await env.DB.prepare(`SELECT * FROM visitors ${includeDemo ? '' : "WHERE delete_token != 'demo'"}
     ORDER BY COALESCE(last_seen, created_at) DESC LIMIT 500`).all<VisitorRow>();
-  return r.results.find((v) => nameKey(v.first_name) === nameKey(name)) ?? null;
+  const same = r.results.filter((v) => nameKey(v.first_name) === nameKey(name));
+  return same.find((v) => v.id === preferId) ?? same[0] ?? null;
 }
 
 export async function guestInfo(env: Env) {
@@ -39,7 +41,7 @@ export async function guestInfo(env: Env) {
 }
 
 export async function arrive(req: Request, env: Env, ctx: ExecutionContext) {
-  const b = await body<{ name?: string; website?: string; id?: string; token?: string; returning?: boolean }>(req);
+  const b = await body<{ name?: string; website?: string; id?: string; token?: string }>(req);
   if (b.website) return json({ ok: true }); // honeypot: bots fill every field
   const name = cleanName(b.name);
   if (!name && !(b.id && b.token)) return json({ error: 'Solo tu nombre, por favor.' }, 400);
@@ -53,11 +55,11 @@ export async function arrive(req: Request, env: Env, ctx: ExecutionContext) {
   if (v && (v.delete_token !== b.token || v.delete_token === 'demo')) v = null;
   const token = v ? v.delete_token : null;
 
-  // A name someone already has: ask before joining them up. Nothing is written until they answer.
+  // A name someone already has: the same guest, back with a phone that forgot them. Unless that
+  // guest is in the flat right now, in which case this is someone else who shares the name.
   if (!v && name) {
-    const same = await namesake(env, name, false);
-    if (same && b.returning === undefined) return json({ known: true, name: same.first_name });
-    if (same && b.returning) v = same;
+    const same = await namesake(env, name, false, b.id);
+    if (same && (same.id === b.id || !isHere(same))) v = same;
   }
   if (!v && !name) return json({ forgotten: true }, 404);
   return checkIn(env, ctx, v, name!, token);
@@ -65,11 +67,13 @@ export async function arrive(req: Request, env: Env, ctx: ExecutionContext) {
 
 /** Owner's demo button: a name that is already on the wall arrives as a returning guest. */
 export async function demoArrive(env: Env, ctx: ExecutionContext, name: string) {
-  return checkIn(env, ctx, await namesake(env, name, true), name, null);
+  return checkIn(env, ctx, await namesake(env, name, true), name, null, true);
 }
 
-async function checkIn(env: Env, ctx: ExecutionContext, v: VisitorRow | null, name: string, token: string | null) {
+async function checkIn(env: Env, ctx: ExecutionContext, v: VisitorRow | null, name: string, token: string | null, always = false) {
   const t = now();
+  // A reload or a second tap moments later shouldn't replay the arrival on every screen.
+  const replay = always || !(v?.last_seen && t - v.last_seen < 120000 && isHere(v, t));
   let id: string, visits = 1, since: number | null = null;
   if (v) {
     // Tapping in again during the same stay is not a new visit.
@@ -86,10 +90,12 @@ async function checkIn(env: Env, ctx: ExecutionContext, v: VisitorRow | null, na
       .bind(id, name, token, t, t).run();
   }
   const greeting = v ? 'Hola de nuevo' : await getSetting(env, 'greeting', 'Bienvenido');
-  const w: Welcome = { id, name, greeting, visits, since, at: t, until: t + WELCOME_MS };
-  await setSetting(env, 'welcome', w);
-  await bumpWall(env);
-  ctx.waitUntil(applyScene(env, 'hosting').then(() => undefined, (e) => console.error(e)));
+  if (replay) {
+    const w: Welcome = { id, name, greeting, visits, since, at: t, until: t + WELCOME_MS };
+    await setSetting(env, 'welcome', w);
+    await bumpWall(env);
+    ctx.waitUntil(applyScene(env, 'hosting').then(() => undefined, (e) => console.error(e)));
+  }
   const wifi = await getSetting<WifiSettings | null>(env, 'wifi', null);
   // deleteToken is null when they were recognised by name only: that is not proof enough to delete.
   return json({ id, deleteToken: token, name, greeting, visits, since, returning: !!v, wifi });

@@ -21,7 +21,7 @@
     input[type=text] { text-align: center; font: 300 24px var(--serif); padding: 12px 0; width: 100%; }
     .hp { position: absolute; left: -9999px; }
     .en { display: block; color: var(--muted); font-size: 11px; letter-spacing: .08em; margin-top: 6px; text-transform: none; }
-    #done h2, #confirm h2 { font-size: clamp(36px, 10vw, 52px); font-style: italic; line-height: 1.1; }
+    #done h2 { font-size: clamp(36px, 10vw, 52px); font-style: italic; line-height: 1.1; }
     .line { font: italic 300 19px var(--serif); color: var(--fg); margin: 14px 0 0; }
     .line .en { font: 300 11px var(--sans); }
     .sky { margin: 36px -16px 0; position: relative; }
@@ -32,7 +32,6 @@
     .qr img { display: block; }
     .how { color: var(--muted); font-size: 13px; line-height: 1.7; max-width: 340px; }
     .err { color: var(--warn); font-size: 13px; min-height: 1.4em; }
-    .choices { display: grid; gap: 12px; justify-items: center; margin-top: 36px; }
     footer { margin-top: 56px; }
   </style>
 </head>
@@ -54,27 +53,12 @@
         Only your first name is kept. While you're here it shows beside your star on the wall, and this phone will remember you next time. You can delete it any time.</p>
     </div>
 
-    <!-- This phone remembers them -->
+    <!-- This phone remembers them: checking in on its own -->
     <div class="card" id="back">
       <p class="eyebrow">Hola de nuevo · Welcome back</p>
       <h1 id="backname"></h1>
-      <form id="fb" style="margin-top:48px">
-        <div><button class="btn" type="submit">Entrar</button></div>
-        <div class="err" id="errb" role="status"></div>
-      </form>
-      <p style="margin-top:24px"><button class="btn quiet small" id="notme" type="button"></button></p>
-    </div>
-
-    <!-- Typed a name that already has a star -->
-    <div class="card" id="confirm">
-      <p class="eyebrow">Ya hay una estrella con este nombre</p>
-      <h2>¿Has estado aquí antes, <span id="cname"></span>?</h2>
-      <p class="meta">There's already a star with this name. Have you been here before?</p>
-      <div class="choices">
-        <button class="btn" id="yes" type="button">Sí, ya vine · Yes, it's me</button>
-        <button class="btn quiet" id="no" type="button">No, es mi primera vez · First time</button>
-      </div>
-      <div class="err" id="errc" role="status"></div>
+      <div class="err" id="errb" role="status" style="margin-top:40px"></div>
+      <button class="btn" id="retry" type="button" hidden>Entrar</button>
     </div>
 
     <!-- In -->
@@ -106,6 +90,7 @@
       <footer>
         <button class="btn quiet small" id="forget" type="button">Borrar mi visita · Delete my visit</button>
         <p class="meta" id="askhost" hidden>Para borrar tu estrella, pídeselo a tu anfitrión.<br>To remove your star, ask your host.</p>
+        <p><button class="btn quiet small" id="notme" type="button"></button></p>
       </footer>
     </div>
   </main>
@@ -135,44 +120,44 @@
     };
 
     // ── Arriving ───────────────────────────────────────────────────────────────
-    let pending = null; // the name waiting on "have you been here before?"
+    // No questions: a phone that has been here checks in by itself, and a name that already has a
+    // star is joined to it by the Worker.
     async function checkIn(payload, errEl, btn) {
       errEl.textContent = '';
       if (btn) btn.disabled = true;
       try {
         const v = await api('/api/arrive', { method: 'POST', body: payload });
-        if (v.known) { pending = payload; $('cname').textContent = v.name; card('confirm'); return; }
         if (!v.id) return; // honeypot
         const had = saved();
         remember({ id: v.id, token: v.deleteToken ?? (had?.id === v.id ? had.token : null), name: v.name, at: Date.now() });
         show(v);
+        return true;
       } catch (err) {
-        if (err.status === 404) { forget(); $('name').value = payload.name ?? ''; card('ask'); return; } // the star was removed
         errEl.textContent = err.message;
+        return false;
       } finally { if (btn) btn.disabled = false; }
     }
 
     $('f').addEventListener('submit', (e) => {
       e.preventDefault();
-      checkIn({ name: $('name').value, website: e.target.website.value }, $('err'), e.submitter);
+      const had = saved();
+      checkIn({ name: $('name').value, website: e.target.website.value, id: had?.id }, $('err'), e.submitter);
     });
-    $('yes').addEventListener('click', (e) => checkIn({ ...pending, returning: true }, $('errc'), e.target));
-    $('no').addEventListener('click', (e) => checkIn({ ...pending, returning: false }, $('errc'), e.target));
 
-    // This phone remembers them: one tap (or none, straight from the door tag).
     const prev = saved();
-    const fromSaved = () => prev.token ? { id: prev.id, token: prev.token, name: prev.name } : { name: prev.name, returning: true };
-    $('fb').addEventListener('submit', (e) => { e.preventDefault(); checkIn(fromSaved(), $('errb'), e.submitter); });
+    const fromSaved = () => ({ id: prev.id, token: prev.token ?? undefined, name: prev.name });
+    async function returning() {
+      $('retry').hidden = true;
+      if (!(await checkIn(fromSaved(), $('errb'), $('retry')))) $('retry').hidden = false;
+    }
+    $('retry').addEventListener('click', returning);
     $('notme').addEventListener('click', () => { forget(); $('name').value = ''; card('ask'); $('name').focus(); });
 
     if (prev && params.has('mine')) show({ name: prev.name, id: prev.id, deleteToken: prev.token, quiet: true });
     else if (prev) {
       $('backname').textContent = prev.name;
-      $('notme').textContent = `¿No eres ${prev.name}? · Not ${prev.name}?`;
       card('back');
-      // Tapped the door tag: check in straight away (but not again on a reload).
-      if (params.has('door') && Date.now() - (prev.at ?? 0) > 3 * 60000) checkIn(fromSaved(), $('errb'));
-      if (params.has('door')) history.replaceState(null, '', location.pathname);
+      returning();
     } else card('ask');
 
     // ── In ─────────────────────────────────────────────────────────────────────
@@ -181,6 +166,7 @@
       $('hello').textContent = v.returning ? `Hola de nuevo, ${v.name}.` : `Hola, ${v.name}.`;
       $('forget').hidden = !v.deleteToken;
       $('askhost').hidden = !!v.deleteToken;
+      $('notme').textContent = `¿No eres ${v.name}? · Not ${v.name}?`;
       if (!v.quiet) sky(v);
       if (v.wifi) {
         $('wifi').hidden = false;

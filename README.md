@@ -5,7 +5,7 @@ A quiet smart-apartment system for a flat in Fuentebravía (El Puerto de Santa M
 - **The wall piece.** Fine contour lines drawn from the real sea outside: swell, wind, tide and the sun's position. It shows on any screen and on an e-ink frame.
 - **Guest arrival.** Guests tap an NFC tag or scan a QR code and type their first name. Each guest gets their own star in the sky of the wall piece, and the lights go to Hosting. They also get the Wi-Fi.
   - **On arrival:** for 30 seconds, every screen plays the arrival. A shooting star lands on the guest's star, it ignites and reflects on the sea, and their name appears with a personal line. A first visit reads *tu estrella, desde hoy · llegas con levante*; a return reads *tercera visita · la anterior, hace 12 días*.
-  - **Remembering guests:** the guest's phone remembers them, so next time they tap once (or not at all; see the NFC section).
+  - **Remembering guests:** the guest's phone remembers them. Next time, tapping the tag is the whole check-in, with no typing and no buttons.
   - **While they're here:** for six hours after they tap in, their star sparkles in gold with their first name beside it. Regulars' stars burn slightly brighter.
 - **Light scenes.** Hosting, Evening, Focus and Off, plus Auto, which follows sunrise and sunset. A simulator runs today, and Govee bulbs connect with just an API key.
 - **Plants.** There are four: an olive tree, a *Strelitzia nicolai*, a snake plant and a ZZ plant. Each has its own watering rules. Claude checks them every morning and writes one dry line per plant. You only hear about it, via Telegram, when something needs you.
@@ -131,12 +131,13 @@ Adding another brand means writing one small adapter object in `worker/src/light
 
 ### Guests: NFC tag and QR code
 
-- Write the guest page URL with `?door` on the end (`…/hola?door`) to an NFC sticker as a **URL record**, using an app such as *NFC Tools*. Print the same URL as a QR code for phones without NFC.
-  - When a phone that has been here before opens the `?door` link, the guest is checked in straight away, with no tapping. Without `?door`, they get a single "Entrar" button.
-- **Returning guests:**
-  - The guest's phone keeps a small key, so the wall recognises them.
-  - If the phone has forgotten them (Safari clears site data after about a week without a visit), typing the same first name asks "¿Has estado aquí antes?". Answering yes joins the visit to their existing star instead of creating a new one.
-  - Tapping in again within the same six-hour stay doesn't count as a new visit.
+- Write the guest page URL (`…/hola`) to an NFC sticker as a **URL record**, using an app such as *NFC Tools*. Print the same URL as a QR code for phones without NFC.
+- **Returning guests** (all automatic, nothing to answer):
+  - The guest's phone keeps a small key. Opening the page on that phone checks them in by itself.
+  - If the phone has forgotten them (Safari clears site data after about a week without a visit), they type their first name and it joins their existing star.
+    - The exception is when a guest with that name is in the flat right now; then it's someone else, who gets their own star.
+    - If a phone is shared, a quiet "¿No eres…? · Not …?" link on the page switches person.
+  - Tapping in again within the same six-hour stay doesn't count as a new visit. A reload or second tap within two minutes doesn't replay the welcome.
 - **Who's here:** **Control → Guests** shows each guest's number of visits and who is *here now*. **End visit** stops a star sparkling early (the star stays on the wall).
 - **iPhone vs Android and Wi-Fi over NFC:**
   - iPhones read URL tags fine, but **can't join Wi-Fi from an NFC tag**. iOS doesn't support Wi-Fi records on tags. That's why the tag opens the web page instead.
