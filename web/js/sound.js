@@ -1,0 +1,80 @@
+// Soft sounds, synthesized on the spot (no audio files): surf, bell-like chimes, a slow chord.
+// Browsers only allow sound after a tap, so it is always opt-in; the choice is remembered.
+const KEY = 'atlantico-sound';
+let ac = null, out = null;
+
+export const soundWanted = () => { try { return localStorage.getItem(KEY) === 'on'; } catch { return false; } };
+
+/** Call from a tap. Returns whether sound is now playing. */
+export async function enableSound(on = true) {
+  try { localStorage.setItem(KEY, on ? 'on' : 'off'); } catch { /* private mode */ }
+  if (!on) { await ac?.suspend(); return false; }
+  if (!ac) {
+    ac = new (window.AudioContext || window.webkitAudioContext)();
+    out = ac.createGain();
+    out.gain.value = 0.7;
+    out.connect(ac.destination);
+  }
+  await ac.resume().catch(() => {});
+  return ac.state === 'running';
+}
+
+/** Without a tap this succeeds only where the browser already allows sound (kiosk tablets). */
+export async function wakeSound() {
+  if (!soundWanted()) return false;
+  return enableSound(true).catch(() => false);
+}
+
+const live = () => ac && ac.state === 'running';
+
+/** A bell: a few inharmonic partials, each fading at its own pace. */
+export function chime(freq = 660, when = 0, level = 0.1) {
+  if (!live()) return;
+  const t = ac.currentTime + when;
+  for (const [ratio, amp, decay] of [[1, 1, 2.8], [2, 0.38, 1.9], [2.76, 0.22, 1.3], [5.4, 0.08, 0.7]]) {
+    const o = ac.createOscillator(), g = ac.createGain();
+    o.type = 'sine';
+    o.frequency.value = freq * ratio;
+    g.gain.setValueAtTime(0, t);
+    g.gain.linearRampToValueAtTime(level * amp, t + 0.012);
+    g.gain.exponentialRampToValueAtTime(0.0001, t + decay);
+    o.connect(g).connect(out);
+    o.start(t);
+    o.stop(t + decay + 0.05);
+  }
+}
+
+/** One wave reaching the shore: filtered noise that swells and draws back. */
+export function surf(seconds = 5, level = 0.18) {
+  if (!live()) return;
+  const n = ac.sampleRate * seconds, buf = ac.createBuffer(1, n, ac.sampleRate), d = buf.getChannelData(0);
+  let b = 0;
+  for (let i = 0; i < n; i++) { b = 0.985 * b + 0.15 * (Math.random() * 2 - 1); d[i] = b; } // soft brown-ish noise
+  const src = ac.createBufferSource(), f = ac.createBiquadFilter(), g = ac.createGain(), t = ac.currentTime;
+  src.buffer = buf;
+  f.type = 'lowpass';
+  f.frequency.setValueAtTime(350, t);
+  f.frequency.linearRampToValueAtTime(1400, t + seconds * 0.4);
+  f.frequency.linearRampToValueAtTime(300, t + seconds);
+  g.gain.setValueAtTime(0, t);
+  g.gain.linearRampToValueAtTime(level, t + seconds * 0.4);
+  g.gain.linearRampToValueAtTime(0, t + seconds);
+  src.connect(f).connect(g).connect(out);
+  src.start(t);
+}
+
+/** The arrival on the wall: three rising notes, like a star catching. */
+export const arrivalSound = () => { chime(659, 0, 0.09); chime(988, 0.22, 0.08); chime(1319, 0.44, 0.07); };
+
+/** Each tour stop has its own small sound. */
+export function stopSound(stop) {
+  switch (stop) {
+    case 'sea': surf(5.5); chime(220, 0.6, 0.06); break;
+    case 'star': chime(880, 0, 0.08); chime(1320, 0.18, 0.06); break;
+    case 'edition': [523, 587, 659, 784, 880].forEach((f, i) => chime(f, i * 0.16, 0.06)); break;
+    case 'sky': [392, 494, 587].forEach((f) => chime(f, 0, 0.05)); break;
+    case 'plants': chime(660, 0, 0.07); chime(990, 0.1, 0.05); break;
+    case 'light': chime(440, 0, 0.07); chime(330, 0.5, 0.07); break;
+    case 'end': chime(523, 0, 0.07); chime(784, 0.3, 0.06); break;
+  }
+}

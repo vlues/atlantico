@@ -33,6 +33,34 @@
     .how { color: var(--muted); font-size: 13px; line-height: 1.7; max-width: 340px; }
     .err { color: var(--warn); font-size: 13px; min-height: 1.4em; }
     footer { margin-top: 56px; }
+    /* The tour: one stop per screen; the wall and the lamps follow along. */
+    .tour { margin-top: 72px; }
+    .hint { color: var(--muted); font-size: 12px; letter-spacing: .14em; text-transform: uppercase; line-height: 2; }
+    .hint i { display: block; font-style: normal; animation: nudge 2.4s ease-in-out infinite; }
+    @keyframes nudge { 50% { transform: translateY(6px); opacity: .5; } }
+    .stop { min-height: 78svh; display: grid; align-content: center; gap: 14px; padding: 24px 0; opacity: .25; transition: opacity 1.2s ease; }
+    .stop.active { opacity: 1; }
+    .stop .n { color: var(--muted); font-size: 11px; letter-spacing: .22em; }
+    .stop h3 { font: italic 300 clamp(32px, 9vw, 44px)/1.1 var(--serif); margin: 0; }
+    .stop h3 + .en { margin-top: -4px; }
+    .stop p { margin: 0; line-height: 1.7; font-size: 15px; }
+    .stop .body-en { color: var(--muted); font-size: 13px; }
+    .stop .data { font: italic 300 19px/1.5 var(--serif); color: var(--warn); }
+    .stop ul { list-style: none; padding: 0; margin: 0; display: grid; gap: 6px; font: 300 18px var(--serif); }
+    .music { margin-top: 64px; display: grid; gap: 14px; text-align: left; }
+    .music .np { font: italic 300 19px/1.4 var(--serif); text-align: center; }
+    .music .np.mine { color: var(--warn); }
+    .music form { display: flex; gap: 10px; }
+    .music input { flex: 1; min-width: 0; font: 300 16px var(--sans); }
+    .music .res { display: grid; gap: 2px; }
+    .music .res div { display: flex; align-items: center; gap: 12px; padding: 8px 0; border-bottom: 1px solid var(--line); }
+    .music .res img { width: 40px; height: 40px; object-fit: cover; }
+    .music .res span { flex: 1; min-width: 0; font-size: 14px; line-height: 1.3; }
+    .music .res small { display: block; color: var(--muted); }
+    .music .status { color: var(--warn); font-size: 13px; min-height: 1.3em; text-align: center; }
+    .music .mine-list { color: var(--muted); font-size: 13px; text-align: center; line-height: 1.7; }
+    .sound { position: fixed; right: 16px; bottom: calc(16px + env(safe-area-inset-bottom)); z-index: 5; background: rgba(10,10,11,.7); backdrop-filter: blur(6px); }
+    @media (prefers-reduced-motion: reduce) { .hint i { animation: none; } .stop { transition: none; } }
   </style>
 </head>
 <body>
@@ -61,14 +89,23 @@
       <button class="btn" id="retry" type="button" hidden>Entrar</button>
     </div>
 
+    <!-- Tapped the door tag on the way out -->
+    <div class="card" id="bye">
+      <p class="eyebrow">Hasta pronto · See you soon</p>
+      <h2 id="byename" style="font-size:clamp(36px,10vw,52px);font-style:italic"></h2>
+      <p class="meta" style="margin-top:24px">Tu estrella se queda en la pared, esperándote.<br>Your star stays on the wall, waiting for you.</p>
+      <p style="margin-top:40px"><button class="btn quiet small" id="stay" type="button">Me quedo · I'm staying</button></p>
+    </div>
+
     <!-- In -->
     <div class="card" id="done">
       <p class="eyebrow">Mira la pared · Look at the wall</p>
       <h2 id="hello"></h2>
+      <span class="en" id="helloEn"></span>
       <p class="line" id="line"></p>
       <figure class="sky" id="skyfig" hidden>
         <canvas id="sky" aria-label="Your star in the sky of the wall piece"></canvas>
-        <figcaption class="eyebrow">Tu estrella · Your star</figcaption>
+        <figcaption class="eyebrow">Tu estrella<span class="en">Your star</span></figcaption>
       </figure>
       <div class="wifi" id="wifi" hidden>
         <p class="eyebrow" style="margin:0">Wi-Fi</p>
@@ -87,6 +124,21 @@
         </div>
         <div class="serif" id="pw" hidden style="font-size:20px;letter-spacing:.06em;user-select:all"></div>
       </div>
+      <section class="music" id="music" hidden>
+        <p class="eyebrow" style="text-align:center;margin:0">Música<span class="en">Music · add a song to the room</span></p>
+        <p class="np" id="np"></p>
+        <form id="msearch" autocomplete="off">
+          <input type="text" id="mq" placeholder="Busca, o pega un enlace · Search or paste a link" enterkeyhint="search">
+          <button class="btn small" type="submit">Buscar</button>
+        </form>
+        <div class="res" id="mres"></div>
+        <div style="text-align:center"><button class="btn quiet small" id="msuggest" type="button">Sorpréndeme · Suggest something</button></div>
+        <p class="status" id="mstatus" role="status"></p>
+        <p class="mine-list" id="mmine"></p>
+      </section>
+      <section class="tour" id="tour" hidden>
+        <p class="hint">Un recorrido por la casa · A tour of the flat<i>↓</i></p>
+      </section>
       <footer>
         <button class="btn quiet small" id="forget" type="button">Borrar mi visita · Delete my visit</button>
         <p class="meta" id="askhost" hidden>Para borrar tu estrella, pídeselo a tu anfitrión.<br>To remove your star, ask your host.</p>
@@ -94,13 +146,16 @@
       </footer>
     </div>
   </main>
+  <button class="btn small sound" id="sound" type="button" hidden>♪ Sonido · Sound</button>
 
   <script src="config.js"></script>
   <script src="vendor/qrcode-generator-1.4.4.js"></script>
   <script type="module">
     import { api, drift } from './js/api.js';
-    import { compose, welcomeLine, hashString } from './lib/art.js';
-    import { sunPosition } from './lib/sun.js';
+    import { compose, welcomeLine, hashString, compass, windName, edition, clock } from './lib/art.js';
+    import { sunPosition, sunTimes } from './lib/sun.js';
+    import { STOPS, COPY } from './lib/tour.js';
+    import { enableSound, wakeSound, soundWanted, stopSound } from './js/sound.js';
     import { moonPosition } from './lib/moon.js';
     import { paint, arrival, revealAt } from './js/paint.js';
 
@@ -131,6 +186,7 @@
         if (!v.id) return; // honeypot
         const had = saved();
         remember({ id: v.id, token: v.deleteToken ?? (had?.id === v.id ? had.token : null), name: v.name, at: Date.now() });
+        if (v.left) { $('byename').textContent = `${v.name}.`; card('bye'); return true; }
         show(v);
         return true;
       } catch (err) {
@@ -146,7 +202,11 @@
     });
 
     const prev = saved();
-    const fromSaved = () => ({ id: prev.id, token: prev.token ?? undefined, name: prev.name });
+    // The tag by the door opens this page with ?door: tapping it again, well into a stay, means leaving.
+    const door = params.has('door');
+    if (door) history.replaceState(null, '', location.pathname);
+    const fromSaved = () => ({ id: prev.id, token: prev.token ?? undefined, name: prev.name, door });
+    $('stay').addEventListener('click', (e) => checkIn({ ...fromSaved(), door: false, stay: true }, $('errb'), e.target));
     async function returning() {
       $('retry').hidden = true;
       if (!(await checkIn(fromSaved(), $('errb'), $('retry')))) $('retry').hidden = false;
@@ -165,10 +225,12 @@
     function show(v) {
       card('done');
       $('hello').textContent = v.returning ? `Hola de nuevo, ${v.name}.` : `Hola, ${v.name}.`;
+      $('helloEn').textContent = v.returning ? `Welcome back, ${v.name}.` : `Welcome, ${v.name}.`;
       $('forget').hidden = !v.deleteToken;
       $('askhost').hidden = !!v.deleteToken;
       $('notme').textContent = `¿No eres ${v.name}? · Not ${v.name}?`;
-      if (!v.quiet) sky(v);
+      if (!v.quiet) sky(v).then((state) => tour(v, state));
+      if (!v.quiet) music(v);
       if (v.wifi) {
         $('wifi').hidden = false;
         $('ssid').textContent = v.wifi.ssid;
@@ -210,6 +272,132 @@
         if (e < 90 && !reduce) requestAnimationFrame(draw);
       };
       requestAnimationFrame(draw);
+      return state;
+    }
+
+    // ── Music ──────────────────────────────────────────────────────────────────
+    // No sign-in: search, paste a link from any service, or ask for a suggestion. The song goes into
+    // the room's queue; the wall tells everyone whose it is when it comes on.
+    async function music(v) {
+      const st = await api(`/api/music?id=${encodeURIComponent(v.id)}`).catch(() => null);
+      if (!st?.connected) return;
+      $('music').hidden = false;
+      let heard = null;
+      const update = (s) => {
+        const np = s.now;
+        const mine = np?.by?.id === v.id;
+        $('np').className = `np${mine ? ' mine' : ''}`;
+        $('np').textContent = !np ? 'Silencio · Nothing playing' : mine ? `Suena tu canción · Your song is on: ${np.title}` : `Suena · Playing: ${np.title} — ${np.artist}${np.by ? ` (de ${np.by.name})` : ''}`;
+        if (mine && heard !== np.at) { heard = np.at; navigator.vibrate?.(180); }
+        if (np?.next?.by === v.name) $('np').textContent += ' · la tuya va después · yours is next';
+        $('mmine').textContent = s.mine.length ? `Tus canciones · Your songs: ${s.mine.map((x) => `${x.title}${x.played_at ? ' ✓' : ''}`).join(' · ')}` : '';
+      };
+      update(st);
+      setInterval(async () => { if (!document.hidden) update(await api(`/api/music?id=${encodeURIComponent(v.id)}`).catch(() => st)); }, 15000);
+
+      const show = (list) => {
+        $('mres').innerHTML = '';
+        if (!list.length) { $('mstatus').textContent = 'Nada encontrado · Nothing found'; return; }
+        for (const t of list) {
+          const row = document.createElement('div');
+          row.innerHTML = '<span></span><button class="btn small" type="button">Añadir · Add</button>';
+          if (t.image) row.prepend(Object.assign(document.createElement('img'), { alt: '', src: t.image }));
+          row.querySelector('span').append(t.title, Object.assign(document.createElement('small'), { textContent: t.artist }));
+          row.querySelector('button').addEventListener('click', async (e) => {
+            e.target.disabled = true;
+            try {
+              await api('/api/music/queue', { method: 'POST', body: { id: v.id, ...t } });
+              $('mstatus').textContent = 'En cola · Queued. La pared dirá que es tuya · The wall will say it is yours.';
+              $('mres').innerHTML = '';
+              $('mq').value = '';
+              update(await api(`/api/music?id=${encodeURIComponent(v.id)}`));
+            } catch (err) { $('mstatus').textContent = err.message; e.target.disabled = false; }
+          });
+          $('mres').append(row);
+        }
+      };
+      const find = async (q) => {
+        $('mstatus').textContent = '';
+        try { show(await api(`/api/music/search?id=${encodeURIComponent(v.id)}&q=${encodeURIComponent(q)}`)); }
+        catch (err) { $('mstatus').textContent = err.message; }
+      };
+      $('msearch').addEventListener('submit', (e) => { e.preventDefault(); if ($('mq').value.trim()) find($('mq').value); });
+      $('mq').addEventListener('paste', () => setTimeout(() => { if (/^https?:\/\//.test($('mq').value.trim())) find($('mq').value); }, 0));
+      $('msuggest').addEventListener('click', async (e) => {
+        e.target.disabled = true;
+        $('mstatus').textContent = 'Pensando · Thinking…';
+        try { show(await api(`/api/music/suggest?id=${encodeURIComponent(v.id)}`)); $('mstatus').textContent = ''; }
+        catch (err) { $('mstatus').textContent = err.message; }
+        e.target.disabled = false;
+      });
+    }
+
+    // ── The tour ───────────────────────────────────────────────────────────────
+    // A short story of the flat, one stop per screen. As each stop comes into view the wall shows
+    // it too, and the lamps nearest what it describes come up (they settle back on their own).
+    async function tour(v, state) {
+      const c = state?.conditions ?? {};
+      const plants = await api('/api/tour').then((r) => r.plants).catch(() => []);
+      const ed = edition(Date.now(), state?.style);
+      const m = state?.moon;
+      const t = c.nextTide;
+      const set = sunTimes(new Date(), state?.lat ?? 36.5986, state?.lon ?? -6.2797).sunset;
+      const wn = windName(c.windSpeed ?? 0, c.windDirection ?? 0);
+      const data = {
+        sea: c.waveHeight != null && `olas de ${c.waveHeight.toFixed(1).replace(".", ",")} m cada ${Math.round(c.wavePeriod)} s · viento ${Math.round(c.windSpeed)} km/h del ${compass(c.windDirection)}${wn && wn !== 'calma' ? ` (${wn})` : ''}${c.tideTrend ? ` · la marea ${c.tideTrend === 'rising' ? 'sube' : 'baja'}` : ''}`,
+        star: welcomeLine(v, c, 'es'),
+        edition: `hoy: ${ed.label} · paleta ${ed.palette.name}`,
+        sky: [m && m.fraction > 0.02 ? `${m.name}, ${Math.round(m.fraction * 100)} %` : null, c.seaTemp != null ? `el agua a ${Math.round(c.seaTemp)} °C` : null,
+          t ? `${t.type === 'high' ? 'pleamar' : 'bajamar'} a las ${clock(Date.parse(t.at))}` : null].filter(Boolean).join(' · '),
+        light: set && `hoy el sol se pone a las ${clock(set.getTime())}`,
+      };
+      const el = $('tour');
+      STOPS.forEach((stop, i) => {
+        const x = COPY[stop];
+        const sec = Object.assign(document.createElement('div'), { className: 'stop' });
+        sec.dataset.stop = stop;
+        sec.innerHTML = `<p class="n">${String(i + 1).padStart(2, '0')} / ${String(STOPS.length).padStart(2, '0')}</p><h3></h3><span class="en"></span><p class="body"></p><p class="body-en"></p>`;
+        sec.querySelector('h3').textContent = x.es;
+        sec.querySelector('.en').textContent = x.en;
+        sec.querySelector('.body').textContent = x.bodyEs;
+        sec.querySelector('.body-en').textContent = x.bodyEn;
+        if (stop === 'plants' && plants.length) {
+          const ul = document.createElement('ul');
+          for (const p of plants) {
+            const li = document.createElement('li');
+            li.textContent = `${p.name}${p.moisture != null ? ` · ${Math.round(p.moisture)} % de humedad` : ''}`;
+            ul.append(li);
+          }
+          sec.append(ul);
+        } else if (data[stop]) sec.append(Object.assign(document.createElement('p'), { className: 'data', textContent: data[stop] }));
+        el.append(sec);
+      });
+      el.hidden = false;
+
+      // Sound is opt-in (browsers need a tap); the button remembers the choice.
+      const btn = $('sound');
+      const label = (on) => { btn.textContent = on ? '♪ Sonido · Sound on' : '♪ Sonido · Sound'; btn.classList.toggle('on', on); };
+      btn.hidden = false;
+      label(await wakeSound());
+      btn.addEventListener('click', async () => label(await enableSound(!soundWanted())));
+
+      // The stop in view (held for half a second) plays on the wall and in the lamps.
+      let current = null, timer = null;
+      const io = new IntersectionObserver((entries) => {
+        for (const en of entries) {
+          en.target.classList.toggle('active', en.isIntersecting);
+          if (!en.isIntersecting) continue;
+          const stop = en.target.dataset.stop;
+          clearTimeout(timer);
+          timer = setTimeout(() => {
+            if (stop === current) return;
+            current = stop;
+            stopSound(stop);
+            api('/api/tour', { method: 'POST', body: { id: v.id, stop } }).catch(() => {});
+          }, 500);
+        }
+      }, { threshold: 0.55 });
+      el.querySelectorAll('.stop').forEach((sec) => io.observe(sec));
     }
 
     $('showpw').addEventListener('click', () => { $('pw').hidden = !$('pw').hidden; });

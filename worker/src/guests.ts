@@ -3,11 +3,12 @@
 // after a week), by their first name. No questions asked.
 import type { Env } from './env';
 import { json } from './http';
-import { now, randomId, rateLimit, getSetting, setSetting, body } from './util';
+import { now, randomId, rateLimit, getSetting, setSetting, body, flag, setFlag } from './util';
 import { applyScene } from './lights';
-import { bumpWall, isHere, type Welcome } from './wall';
+import { bumpWall, isHere, WELCOME_MS, type Welcome } from './wall';
 
-export const WELCOME_MS = 30000;
+/** Tapping the door tag again after this long in the flat means leaving. */
+const LEAVE_AFTER_MS = 45 * 60000;
 
 export interface WifiSettings { ssid: string; password: string; security: 'WPA' | 'WEP' | 'nopass'; hidden?: boolean }
 
@@ -41,12 +42,13 @@ export async function guestInfo(env: Env) {
 }
 
 export async function arrive(req: Request, env: Env, ctx: ExecutionContext) {
-  const b = await body<{ name?: string; website?: string; id?: string; token?: string }>(req);
+  const b = await body<{ name?: string; website?: string; id?: string; token?: string; door?: boolean; stay?: boolean }>(req);
   if (b.website) return json({ ok: true }); // honeypot: bots fill every field
   const name = cleanName(b.name);
   if (!name && !(b.id && b.token)) return json({ error: 'Solo tu nombre, por favor.' }, 400);
   const ip = req.headers.get('cf-connecting-ip') ?? 'local';
-  if (!(await rateLimit(env, `arrive:${ip}`, 8, 600)) || !(await rateLimit(env, 'arrive:all', 60, 86400))) {
+  // Generous enough for a whole party tapping in on the flat's Wi-Fi at once.
+  if (!(await rateLimit(env, `arrive:${ip}`, 24, 600)) || !(await rateLimit(env, 'arrive:all', 200, 86400))) {
     return json({ error: 'Un momento, por favor. Inténtalo de nuevo más tarde.' }, 429);
   }
 
@@ -62,7 +64,32 @@ export async function arrive(req: Request, env: Env, ctx: ExecutionContext) {
     if (same && (same.id === b.id || !isHere(same))) v = same;
   }
   if (!v && !name) return json({ forgotten: true }, 404);
+  // "Me quedo": undo a tap-out.
+  if (v && b.stay) {
+    await env.DB.prepare('UPDATE visitors SET left_at = NULL WHERE id = ?').bind(v.id).run();
+    await env.DB.prepare("DELETE FROM settings WHERE key = 'farewell'").run();
+    await bumpWall(env);
+    return json({ id: v.id, deleteToken: token, name: v.first_name, visits: v.visits, stayed: true, wifi: await getSetting<WifiSettings | null>(env, 'wifi', null) });
+  }
+  // Tap in, tap out: the door tag again, well into a stay, means they are leaving.
+  if (v && b.door && isHere(v) && now() - (v.last_seen ?? 0) > LEAVE_AFTER_MS) return leave(env, ctx, v, token);
   return checkIn(env, ctx, v, name!, token);
+}
+
+async function leave(env: Env, ctx: ExecutionContext, v: VisitorRow, token: string | null) {
+  const t = now();
+  await env.DB.prepare('UPDATE visitors SET left_at = ? WHERE id = ?').bind(t, v.id).run();
+  await setSetting(env, 'farewell', { id: v.id, name: v.first_name, at: t, until: t + 20000 });
+  await bumpWall(env);
+  ctx.waitUntil(lastOneOut(env).catch((e) => console.error(e)));
+  return json({ left: true, id: v.id, deleteToken: token, name: v.first_name, visits: v.visits });
+}
+
+/** When nobody is here any more, lights that guests switched to Hosting go back to Auto. */
+export async function lastOneOut(env: Env) {
+  const rows = await env.DB.prepare('SELECT last_seen, left_at FROM visitors WHERE last_seen > ?').bind(now() - 7 * 3600000).all<any>();
+  if (rows.results.some((r) => isHere(r))) return;
+  if ((await flag(env, 'scene')) === 'hosting' && (await flag(env, 'scene:by')) === 'guests') await applyScene(env, 'auto');
 }
 
 /** Owner's demo button: a name that is already on the wall arrives as a returning guest. */
@@ -82,7 +109,8 @@ async function checkIn(env: Env, ctx: ExecutionContext, v: VisitorRow | null, na
     name = v.first_name;
     visits = v.visits + (sameStay ? 0 : 1);
     since = sameStay ? null : t - (v.last_seen ?? v.created_at);
-    await env.DB.prepare('UPDATE visitors SET visits = ?, last_seen = ?, left_at = NULL WHERE id = ?').bind(visits, t, id).run();
+    // A reload moments later changes nothing (so it can't re-open a welcome that already played).
+    if (replay) await env.DB.prepare('UPDATE visitors SET visits = ?, last_seen = ?, left_at = NULL WHERE id = ?').bind(visits, t, id).run();
   } else {
     id = randomId(9);
     token = randomId(16);
@@ -94,7 +122,7 @@ async function checkIn(env: Env, ctx: ExecutionContext, v: VisitorRow | null, na
     const w: Welcome = { id, name, greeting, visits, since, at: t, until: t + WELCOME_MS };
     await setSetting(env, 'welcome', w);
     await bumpWall(env);
-    ctx.waitUntil(applyScene(env, 'hosting').then(() => undefined, (e) => console.error(e)));
+    ctx.waitUntil(setFlag(env, 'scene:by', 'guests').then(() => applyScene(env, 'hosting')).then(() => undefined, (e) => console.error(e)));
   }
   const wifi = await getSetting<WifiSettings | null>(env, 'wifi', null);
   // deleteToken is null when they were recognised by name only: that is not proof enough to delete.
@@ -106,7 +134,10 @@ export async function deleteVisitor(id: string, req: Request, env: Env, owner = 
   const row = await env.DB.prepare('SELECT delete_token FROM visitors WHERE id = ?').bind(id).first<any>();
   if (!row) return json({ ok: true });
   if (!owner && row.delete_token !== (b as any).token) return json({ error: 'not allowed' }, 403);
-  await env.DB.prepare('DELETE FROM visitors WHERE id = ?').bind(id).run();
+  await env.DB.batch([
+    env.DB.prepare('DELETE FROM visitors WHERE id = ?').bind(id),
+    env.DB.prepare('DELETE FROM song_requests WHERE visitor_id = ?').bind(id),
+  ]);
   const w = await getSetting<Welcome | null>(env, 'welcome', null);
   if (w?.id === id) await env.DB.prepare("DELETE FROM settings WHERE key = 'welcome'").run();
   await bumpWall(env);

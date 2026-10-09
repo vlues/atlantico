@@ -50,20 +50,6 @@ function layout(text, key) {
   return { font, placed, width: x };
 }
 
-/** Per-glyph polygon lists for `text`, cap height `cap` px, baseline at y. */
-export function textContours(text, x, y, cap, align = 'left', key = 'regular', tracking = 0.04) {
-  const { font, placed, width } = layout(text, key);
-  const k = cap / font.capHeight;
-  const track = tracking * font.upm;
-  const w = (width + track * Math.max(0, placed.length - 1)) * k;
-  const x0 = align === 'center' ? x - w / 2 : align === 'right' ? x - w : x;
-  // One entry per glyph (each a list of contours), so callers can fill glyph by glyph.
-  return placed.map(({ g, x: gx }, i) => {
-    const ox = x0 + (gx + track * i) * k;
-    return g.contours.map((c) => c.map((v, j) => (j % 2 ? y + v * k : ox + v * k)));
-  });
-}
-
 /** Glyph placements (glyph outlines in font units, origin in px, scale), for renderers that cache glyphs. */
 export function textGlyphs(text, x, y, cap, align = 'left', key = 'regular', tracking = 0.04) {
   const { font, placed, width } = layout(text, key);

@@ -2,7 +2,7 @@
 import type { Env } from './env';
 import { getConditions, type Conditions } from './weather';
 import { json } from './http';
-import { deviceFromRequest, getSetting, setSetting } from './util';
+import { deviceFromRequest, setSetting, settings } from './util';
 // @ts-ignore — shared plain-JS modules, also served to the browser
 import { compose, toSVG } from '../../web/lib/art.js';
 // @ts-ignore
@@ -12,8 +12,17 @@ import { sunPosition } from '../../web/lib/sun.js';
 // @ts-ignore
 import { moonPosition } from '../../web/lib/moon.js';
 
-/** The arrival moment every screen plays: whose star, which visit, how long since the last. */
-export interface Welcome { id: string; name: string; greeting: string; visits: number; since: number | null; at: number; until: number }
+/** How long the screens hold a welcome after the latest arrival. */
+export const WELCOME_MS = 30000;
+
+/**
+ * The arrival moment every screen plays: whose star, which visit, how long since the last.
+ * When several people arrive close together, `group` lists them all (in order of arrival).
+ */
+export interface Welcome {
+  id: string; name: string; greeting: string; visits: number; since: number | null; at: number; until: number;
+  group?: { id: string; name: string; visits: number }[];
+}
 /** One star per guest. Name only while they are here (they asked to be on the wall). */
 export interface Star { id: string; visits: number; here?: boolean; name?: string }
 export interface WallState {
@@ -22,6 +31,10 @@ export interface WallState {
   moon: { altitude: number; azimuth: number; fraction: number; phase: number; waxing: boolean; name: string; nameEn: string };
   sunOverride: string | null;
   style: string | null;   // demo: preview one of the daily styles instead of today's
+  editionDate: number;    // which day's edition to draw (today, or a day ahead from the demo strip)
+  tour: { id: string | null; name: string | null; visits: number; stop: string; at: number; until: number; showcase?: boolean } | null;
+  farewell: { id: string; name: string; at: number; until: number } | null;   // a guest tapping out
+  music: { title: string; artist: string; by: { id: string; name: string } | null; at: number; next: { title: string; by: string } | null } | null;
   scene: string;
   dark: boolean;
   visitors: Star[];
@@ -49,23 +62,47 @@ export const SUN_PRESETS: Record<string, { altitude: number; azimuth: number }> 
 export async function wallState(env: Env, scenario?: string | null): Promise<WallState> {
   const lat = Number(env.LAT), lon = Number(env.LON);
   const t = Date.now();
-  const [demoScenario, sunOverride, style, scene, welcome, rows] = await Promise.all([
-    env.STATE.get('demo:scenario'),
-    env.STATE.get('demo:sun'),
-    env.STATE.get('demo:style'),
-    env.STATE.get('scene'),
-    getSetting<Welcome | null>(env, 'welcome', null),
+  const [set, rows] = await Promise.all([
+    settings(env, ['demo:scenario', 'demo:sun', 'demo:style', 'demo:day', 'scene', 'welcome', 'tour', 'farewell', 'music:now']),
     env.DB.prepare('SELECT id, first_name, visits, last_seen, left_at FROM visitors ORDER BY created_at').all<any>()
       .then((r) => r.results).catch(() => []),
   ]);
+  const demoScenario: string | null = set['demo:scenario'] ?? null, sunOverride: string | null = set['demo:sun'] ?? null;
+  const style: string | null = set['demo:style'] ?? null, dayAhead = set['demo:day'], scene: string | null = set.scene ?? null;
+  const welcome: Welcome | null = set.welcome ?? null, tour: WallState['tour'] = set.tour ?? null;
+  // Arrivals chain into one welcome while each comes within WELCOME_MS of the next. Read from the
+  // visitors themselves (one row each), so simultaneous arrivals can't overwrite one another.
+  const recent = rows.filter((r: any) => r.last_seen && t - r.last_seen < 10 * 60000 && !(r.left_at != null && r.left_at >= r.last_seen))
+    .sort((a: any, b: any) => b.last_seen - a.last_seen);
+  const group: any[] = [];
+  for (const r of recent) {
+    const newer = group[group.length - 1];
+    if (!newer ? t - r.last_seen > WELCOME_MS : newer.last_seen - r.last_seen > WELCOME_MS) break;
+    if (group.length < 24) group.push(r);
+  }
   const visitors: Star[] = rows.map((r: any) =>
     isHere(r, t) ? { id: r.id, visits: r.visits, here: true, name: r.first_name } : { id: r.id, visits: r.visits });
   const conditions = await getConditions(env, scenario || demoScenario);
   const sun = (sunOverride && SUN_PRESETS[sunOverride]) || sunPosition(new Date(), lat, lon);
-  const active = welcome && welcome.until > t ? welcome : null;
+  let active: Welcome | null = null;
+  if (group.length === 1) {
+    const g = group[0];
+    active = welcome && welcome.id === g.id ? { ...welcome, until: g.last_seen + WELCOME_MS }
+      : { id: g.id, name: g.first_name, greeting: g.visits > 1 ? 'Hola de nuevo' : 'Bienvenido', visits: g.visits, since: null, at: g.last_seen, until: g.last_seen + WELCOME_MS };
+  } else if (group.length > 1) {
+    const g = group[0];
+    active = {
+      id: g.id, name: g.first_name, greeting: 'Bienvenidos', visits: g.visits, since: null, at: g.last_seen, until: g.last_seen + WELCOME_MS,
+      group: group.slice().reverse().map((r) => ({ id: r.id, name: r.first_name, visits: r.visits })),
+    };
+  }
   const s = scene ?? 'auto';
   return {
     conditions, sun, moon: moonPosition(new Date(t), lat, lon), style,
+    editionDate: t + (Number(dayAhead) || 0) * 86400000,
+    tour: tour && tour.until > t ? tour : null,
+    farewell: set.farewell && set.farewell.until > t ? set.farewell : null,
+    music: set['music:now'] ?? null,
     sunOverride: sunOverride && SUN_PRESETS[sunOverride] ? sunOverride : null,
     scene: s, lat, lon, visitors, welcome: active,
     dark: !!active || DARK_SCENES.has(s) || sun.altitude < -2,
@@ -79,21 +116,27 @@ export async function bumpWall(env: Env) {
   await setSetting(env, 'wall:rev', Date.now());
 }
 
-/** Cheap version string (one small query); screens poll it and only fetch more when it changes. */
-export async function wallVersion(env: Env): Promise<string> {
-  const r = await env.DB.prepare("SELECT key, value FROM settings WHERE key IN ('wall:rev', 'welcome')").all<{ key: string; value: string }>();
+/**
+ * Cheap version string (one small query); screens poll it and only fetch more when it changes.
+ * Browser walls also follow the guest tour; e-ink panels don't (they would redraw for every stop).
+ */
+export async function wallVersion(env: Env, withTour = false): Promise<string> {
+  const r = await env.DB.prepare("SELECT key, value FROM settings WHERE key IN ('wall:rev', 'welcome', 'tour', 'farewell', 'music:now')").all<{ key: string; value: string }>();
   const get = (k: string) => { const row = r.results.find((x) => x.key === k); return row ? JSON.parse(row.value) : null; };
-  const w: Welcome | null = get('welcome');
-  return `${get('wall:rev') ?? 0}.${Math.floor(Date.now() / 900000)}${w && w.until > Date.now() ? `w${w.at}` : ''}`;
+  const w: Welcome | null = get('welcome'), t = Date.now();
+  const v = `${get('wall:rev') ?? 0}.${Math.floor(t / 900000)}${w && w.until > t ? `w${w.at}` : ''}`;
+  if (!withTour) return v;
+  const tour = get('tour'), fw = get('farewell'), m = get('music:now');
+  return `${v}${tour && tour.until > t ? `t${tour.at}` : ''}${fw && fw.until > t ? `f${fw.at}` : ''}${m?.by ? `m${m.at}` : ''}`;
 }
 
 function composeFor(state: WallState, width: number, height: number, overrides: { dark?: boolean } = {}, print = false) {
   return compose({ ...state.conditions, sun: state.sun, moon: state.moon }, {
-    width, height, print, lat: state.lat, lon: state.lon, date: Date.now(), style: state.style,
+    width, height, print, lat: state.lat, lon: state.lon, date: state.editionDate, style: state.style,
     dark: overrides.dark ?? state.dark,
     visitors: state.visitors,
     welcome: state.welcome,
-    hero: state.welcome?.id,
+    heroes: (state.welcome?.group ?? (state.welcome ? [state.welcome] : [])).map((g) => ({ id: g.id, reveal: 1 })),
     time: Date.now() / 1000,
   });
 }

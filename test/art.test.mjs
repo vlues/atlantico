@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { compose as composeAny, hashString, windName, welcomeLine, edition, liveLine, STYLES } from '../web/lib/art.js';
+import { compose as composeAny, hashString, windName, welcomeLine, welcomeText, edition, liveLine, STYLES } from '../web/lib/art.js';
 import { moonPosition } from '../web/lib/moon.js';
 
 // Geometry tests use the classic style; each daily style gets its own tests below.
@@ -77,7 +77,7 @@ const night = { ...calm, sun: { altitude: -20, azimuth: 300 } };
 test('guests who are here sparkle and carry their name; the rest stay quiet dots', () => {
   const comp = compose(night, { width: 800, height: 480, visitors: [{ id: 'ana', visits: 2, here: true, name: 'Ana' }, { id: 'tom', visits: 1 }] });
   assert.ok(comp.lines.filter((l) => l.accent === 'here').length >= 8, 'four-point sparkle');
-  assert.deepEqual(comp.texts.filter((t) => t.accent === 'here').map((t) => t.text), ['Ana']);
+  assert.deepEqual(comp.texts.filter((t) => t.role === 'label').map((t) => t.text), ['Ana']);
   assert.equal(comp.circles.filter((c) => c.accent === 'visitor').length, 1);
   assert.ok(!comp.lines.some((l) => l.dotted && l.accent), 'no constellation lines into a guest who is here');
 });
@@ -91,7 +91,8 @@ test('the welcomed star appears with its entrance and reflects on the water', ()
   const after = compose(night, { width: 800, height: 480, visitors, welcome, hero: 'lu', reveal: 1, print: true });
   const glints = after.lines.filter((l) => l.accent === 'here' && l.pts[1] > after.horizon);
   assert.ok(glints.length > 10 && glints.every((l) => Math.abs(l.pts[0] - after.hero.x) < 40), 'a column of glints below the star');
-  assert.deepEqual(after.texts.filter((t) => t.role).map((t) => t.text), ['Hola de nuevo', 'Lucía', 'tercera visita · la anterior, hace 12 días']);
+  assert.deepEqual(after.texts.filter((t) => ['greeting', 'name', 'line'].includes(t.role)).map((t) => t.text),
+    ['Hola de nuevo', 'Welcome back', 'Lucía', 'tercera visita · la anterior, hace 12 días', 'third visit · the last one 12 days ago']);
 });
 
 test('the welcome words step aside rather than cover the guest\'s own star', () => {
@@ -177,4 +178,36 @@ test('clouds and rain come from the live weather', () => {
 test('the live caption: sea temperature, tide and moon', () => {
   const line = liveLine({ seaTemp: 22.6, tideTrend: 'rising', nextTide: { type: 'high', at: '2026-10-09T12:37:00Z' }, moon: { fraction: 0.38, waxing: true } });
   assert.equal(line, 'sea 23 °C · tide rising, high at 14:37 · moon 38 % waxing');
+});
+
+test('several guests arriving together get one welcome: all their names, new and returning counted', () => {
+  const group = [{ id: 'a', name: 'Ana', visits: 1 }, { id: 'b', name: 'Tom', visits: 1 }, { id: 'c', name: 'Lucía', visits: 3 }];
+  const w = welcomeText({ group });
+  assert.equal(w.greeting, 'Bienvenidos');
+  assert.equal(w.title, 'Ana · Tom · Lucía');
+  assert.equal(w.line, 'dos estrellas nuevas · una que vuelve');
+  assert.equal(w.lineEn, 'two new stars · one returning');
+  const crowd = welcomeText({ group: Array.from({ length: 9 }, (_, i) => ({ id: `g${i}`, name: `N${i}`, visits: 2 })) });
+  assert.equal(crowd.title, 'N0 · N1 · N2 · N3 · +5');
+  assert.equal(crowd.line, 'nueve que vuelven');
+  // Each of them gets an entrance on the wall; their names sit in a clearing the sea opens for them,
+  // leaving every arriving star in plain view.
+  const visitors = group.map((g) => ({ ...g, here: true }));
+  const comp = compose(night, { width: 800, height: 480, print: true, visitors, welcome: { group }, heroes: group.map((g) => ({ id: g.id, reveal: 1 })) });
+  assert.equal(comp.heroes.length, 3);
+  const name = comp.texts.find((t) => t.role === 'name');
+  assert.ok(name.y > comp.horizon, 'names in the sea');
+  const half = [...name.text].length * name.size * 0.31;
+  const inside = comp.lines.filter((l) => !l.accent).some((l) => l.pts.some((v, q) => q % 2 === 0 && Math.abs(v - name.x) < half && Math.abs(l.pts[q + 1] - (name.y - name.size / 2)) < name.size / 2));
+  assert.ok(!inside, 'the sea parts around them');
+});
+
+test('names float around their stars, each in its own way, and still on e-ink', () => {
+  const visitors = [{ id: 'ana', here: true, name: 'Ana' }, { id: 'tom', here: true, name: 'Tom' }];
+  const at = (time, print = false) => compose(night, { width: 800, height: 480, visitors, time, print }).texts.filter((t) => t.role === 'label');
+  const [a1, a2] = [at(0), at(20)];
+  assert.ok(a1.every((t) => t.arc), 'names are set on a curve');
+  assert.ok(Math.abs(a1[0].arc.a - a2[0].arc.a) > 0.01, 'they sway over time');
+  assert.notEqual((a2[0].arc.a - a1[0].arc.a).toFixed(3), (a2[1].arc.a - a1[1].arc.a).toFixed(3), 'each at its own pace');
+  assert.deepEqual(at(0, true).map((t) => t.arc.a), at(99, true).map((t) => t.arc.a), 'still on e-ink');
 });

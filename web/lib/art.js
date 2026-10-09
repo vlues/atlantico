@@ -115,6 +115,21 @@ export function edition(ms = Date.now(), style = null) {
   };
 }
 
+/** Lines with the points inside a rectangle removed (split where they cross it). */
+function cutOut(lines, b) {
+  const out = [];
+  for (const l of lines) {
+    let seg = [];
+    for (let q = 0; q < l.pts.length; q += 2) {
+      const x = l.pts[q], y = l.pts[q + 1];
+      if (x > b.x0 && x < b.x1 && y > b.y0 && y < b.y1) { if (seg.length >= 4) out.push({ ...l, pts: seg }); seg = []; }
+      else seg.push(x, y);
+    }
+    if (seg.length >= 4) out.push({ ...l, pts: seg });
+  }
+  return out;
+}
+
 /** The lit part of the moon as a polygon: limb on the sunward side, terminator back. */
 function moonShape(x, y, r, phase) {
   const side = phase < 0.5 ? 1 : -1;
@@ -305,45 +320,58 @@ export function compose(c, o = {}) {
 
   // Visitors: one star each, placed deterministically in the sky by id. Regulars burn a little
   // brighter; guests who are here right now sparkle and carry their name.
-  const reveal = clamp(o.reveal ?? 1, 0, 1);
-  const grow = 1 - Math.pow(1 - reveal, 3);
+  // Heroes are the stars being welcomed (several when people arrive together), each with its own entrance.
+  const heroes = new Map((o.heroes ?? (o.hero != null ? [{ id: o.hero, reveal: o.reveal ?? 1 }] : []))
+    .map((h) => [h.id, clamp(h.reveal ?? 1, 0, 1)]));
   const stars = [];
-  let heroAt = null; // where the welcomed star is, even before it has appeared (screens animate toward it)
+  const heroAt = []; // where each welcomed star is, even before it appears (screens animate toward it)
   for (const v of o.visitors ?? []) {
     const h = hashString(String(v.id));
     const px = sky.x0 + (sky.x1 - sky.x0) * hash(h, 1, 11);
     const py = sky.y0 + (sky.y1 - sky.y0) * Math.pow(hash(h, 2, 13), 0.8);
     if (sunMark && Math.hypot(px - sunMark.x, py - sunMark.y) < sunMark.r * 2.5) continue;
     if (moonMark && Math.hypot(px - moonMark.x, py - moonMark.y) < moonMark.r * 2.2) continue;
-    const hero = o.hero != null && v.id === o.hero;
-    if (hero) heroAt = { x: px, y: py };
+    const reveal = heroes.get(v.id);
+    const hero = reveal !== undefined;
+    if (hero) heroAt.push({ id: v.id, x: px, y: py });
     if (hero && reveal < 0.02) continue; // still on its way in
-    stars.push({ x: px, y: py, h, v, hero, here: !!v.here || hero });
+    stars.push({ x: px, y: py, h, v, hero, reveal: reveal ?? 1, here: !!v.here || hero });
   }
-  const hero = stars.find((d) => d.hero) ?? null;
+
   // Typography.
   const cap = o.print ? Math.max(9.5, S * 0.019) : Math.max(9, S * 0.017);
   const textW = (str, size) => [...str].length * size * 0.62; // close enough for Cormorant
   const texts = [];
   let block = null;
-  if (o.welcome?.name) {
-    const big = Math.max(18, S * 0.07);
-    const cy = (H * 0.1 + horizon) / 2 - big * 0.15;
-    const line = welcomeLine(o.welcome, c);
-    const half = Math.max(textW(o.welcome.name, big), textW(o.welcome.greeting ?? '', big * 0.42), textW(line, cap * 1.05)) / 2;
+  const wt = o.welcome ? welcomeText(o.welcome, c) : null;
+  let clearing = null;
+  if (wt) {
+    // Spanish first, English small beneath, sized to fit whatever the day's horizon. One guest's
+    // welcome sits in the sky beside their star; a group's opens a clearing in the sea instead,
+    // so every arriving star stays in plain view.
+    const inSea = !!o.welcome.group && o.welcome.group.length > 1;
+    const avail = inSea ? (H * 0.84 - horizon) * 0.8 : horizon - H * 0.1 - S * 0.01;
+    let big = clamp(Math.min(S * 0.07, (avail - cap * 2.2) / 2.85), 14, S * 0.07);
+    big = Math.min(big, (fw * 0.92) / Math.max(1, [...wt.title].length * 0.62));
+    const cy = inSea ? horizon + (H * 0.84 - horizon) * 0.08 + big * 1.45 : H * 0.1 + avail * 0.5 - big * 0.05;
+    const gs = Math.max(cap * 1.1, big * 0.4), en = cap * 0.85;
+    const half = Math.max(textW(wt.title, big), textW(wt.greeting, gs), textW(wt.line, cap * 1.05), textW(wt.lineEn, en)) / 2;
     const pad = S * 0.05;
     let cx = W / 2;
-    const top = cy - big * 1.35, bot = cy + big * 1.2 + cap * 0.4;
-    // The guest's own star stays in view: the words step aside if they would cover it.
-    const hp = heroAt;
+    const top = cy - big * 1.45, bot = cy + big * 1.2 + cap * 1.6;
+    // The newest guest's star stays in view: the words step aside if they would cover it.
+    const hp = inSea ? null : heroAt[0];
     if (hp && hp.y > top - pad && hp.y < bot + pad && Math.abs(hp.x - cx) < half + pad) {
       cx = hp.x < W / 2 ? hp.x + pad + half : hp.x - pad - half;
       cx = clamp(cx, mx + half, W - mx - half);
     }
     block = { x0: cx - half - S * 0.015, x1: cx + half + S * 0.015, y0: top, y1: bot };
-    texts.push({ text: o.welcome.greeting ?? 'Bienvenido', x: cx, y: cy - big * 0.85, size: big * 0.42, align: 'center', italic: true, alpha: 0.85, role: 'greeting' });
-    texts.push({ text: o.welcome.name, x: cx, y: cy + big * 0.55, size: big, align: 'center', alpha: 1, role: 'name' });
-    if (line) texts.push({ text: line, x: cx, y: cy + big * 1.2, size: cap * 1.05, align: 'center', italic: true, alpha: 0.75, role: 'line' });
+    if (inSea) clearing = { x0: block.x0 - S * 0.03, x1: block.x1 + S * 0.03, y0: top - S * 0.02, y1: bot + S * 0.015 };
+    texts.push({ text: wt.greeting, x: cx, y: cy - big * 1.05, size: gs, align: 'center', italic: true, alpha: 0.85, role: 'greeting' });
+    texts.push({ text: wt.greetingEn, x: cx, y: cy - big * 1.05 + en * 1.9, size: en, align: 'center', alpha: 0.55, role: 'greeting' });
+    texts.push({ text: wt.title, x: cx, y: cy + big * 0.6, size: big, align: 'center', alpha: 1, role: 'name' });
+    if (wt.line) texts.push({ text: wt.line, x: cx, y: cy + big * 1.2, size: cap * 1.05, align: 'center', italic: true, alpha: 0.75, role: 'line' });
+    if (wt.lineEn) texts.push({ text: wt.lineEn, x: cx, y: cy + big * 1.2 + cap * 1.55, size: en, align: 'center', alpha: 0.5, role: 'line' });
   }
   const inBlock = (d) => block && d.x > block.x0 && d.x < block.x1 && d.y > block.y0 && d.y < block.y1;
   const dots = stars.filter((d) => d.hero || !inBlock(d));
@@ -371,6 +399,7 @@ export function compose(c, o = {}) {
     }
     // A four-point sparkle: thicker near the core, hairline at the tips, slow twinkle on screens.
     const tw = o.print ? 1 : 1 + 0.12 * Math.sin(t * 1.7 + (d.h % 628) / 100);
+    const grow = 1 - Math.pow(1 - d.reveal, 3);
     const L = (d.hero ? S * 0.05 * grow : S * 0.027) * tw * (d.hero ? 1 : regular * 0.85);
     const d0 = S * (d.hero ? 0.009 : 0.006);
     const thin = o.print ? 1 : 0.8;
@@ -381,33 +410,43 @@ export function compose(c, o = {}) {
     }
     circles.push({ x: d.x, y: d.y, r: S * (d.hero ? 0.0062 : 0.0045), fill: true, alpha: 1, accent: 'here' });
     circles.push({ x: d.x, y: d.y, r: S * (d.hero ? 0.017 + 0.004 * Math.sin(t * 0.9) * (o.print ? 0 : 1) : 0.0115), fill: false, alpha: d.hero ? 0.55 : 0.4, accent: 'here' });
-    if (d.v.name && !(d.hero && o.welcome)) labels.push(d);
+    if (d.v.name && !o.welcome) labels.push(d); // during a welcome, the arrivals have the stage
   }
 
-  // Names beside the stars of guests who are here, kept clear of the words, the sun, other stars
-  // and each other.
+  // Names float around their stars: each curves along a small circle and sways at its own pace
+  // (its own speed, direction and starting point, new every day). Kept clear of the words, the sun
+  // and moon, other stars and each other; on e-ink they sit still where they fit best.
   const box = (x, y, r, owner) => ({ x0: x - r, x1: x + r, y0: y - r, y1: y + r, owner });
   const placed = block ? [block] : [];
   if (sunMark) placed.push(box(sunMark.x, sunMark.y, sunMark.r * 1.6));
   if (moonMark) placed.push(box(moonMark.x, moonMark.y, moonMark.r * 1.5));
   for (const d of dots) placed.push(box(d.x, d.y, S * (d.hero ? 0.05 : d.here ? 0.026 : 0.007), d));
+  const arcBox = (x, y, r, a, span, size) => {
+    let x0 = Infinity, x1 = -Infinity, y0 = Infinity, y1 = -Infinity;
+    for (let k = 0; k <= 6; k++) {
+      const p = a - span / 2 + (span * k) / 6;
+      for (const rr of [r - size * 0.3, r + size * 1.4]) {
+        const px = x + rr * Math.cos(p), py = y + rr * Math.sin(p);
+        x0 = Math.min(x0, px); x1 = Math.max(x1, px); y0 = Math.min(y0, py); y1 = Math.max(y1, py);
+      }
+    }
+    return { x0, x1, y0, y1 };
+  };
   for (const d of labels) {
     const hit = (b) => placed.some((p) => p.owner !== d && b.x0 < p.x1 && b.x1 > p.x0 && b.y0 < p.y1 && b.y1 > p.y0);
-    const size = cap * 0.95, w = textW(d.v.name, size), gap = S * 0.022;
-    const tries = [
-      { x: d.x + gap, y: d.y + size * 0.35, align: 'left' },
-      { x: d.x - gap, y: d.y + size * 0.35, align: 'right' },
-      { x: d.x, y: d.y + gap + size * 1.1, align: 'center' },
-      { x: d.x, y: d.y - gap - size * 0.2, align: 'center' },
-    ];
-    for (const p of tries) {
-      const x0 = p.align === 'left' ? p.x : p.align === 'right' ? p.x - w : p.x - w / 2;
-      const b = { x0, x1: x0 + w, y0: p.y - size * 1.1, y1: p.y + size * 0.35 };
-      if (b.x0 < mx * 0.5 || b.x1 > W - mx * 0.5 || hit(b)) continue;
-      placed.push(b);
-      texts.push({ text: d.v.name, x: p.x, y: p.y, size, align: p.align, italic: true, alpha: 0.9, accent: 'here' });
-      break;
-    }
+    const size = cap * 0.95, w = textW(d.v.name, size);
+    const u = (k) => hash(d.h, k, ed.day + 401); // this star's own motion, new every day
+    const r0 = S * (0.03 + 0.008 * u(1));
+    const span = Math.min(Math.PI * 1.2, w / r0);
+    const start = -Math.PI / 2 + (u(2) - 0.5) * 0.5;
+    const tries = [0, -0.45, 0.45, -0.8, 0.8, Math.PI, Math.PI - 0.45, Math.PI + 0.45].map((da) => start + da); // over or under, never the sides
+    const a0 = tries.find((a) => { const b = arcBox(d.x, d.y, r0, a, span, size); return b.x0 > mx * 0.5 && b.x1 < W - mx * 0.5 && !hit(b); });
+    if (a0 === undefined) continue;
+    placed.push(arcBox(d.x, d.y, r0, a0, span, size));
+    const sway = o.print ? 0 : 0.3 * Math.sin(t * (0.05 + 0.07 * u(3)) * (u(4) < 0.5 ? -1 : 1) + u(5) * TAU);
+    const a = a0 + sway;
+    texts.push({ text: d.v.name, arc: { x: d.x, y: d.y, r: r0, a }, size, italic: true, alpha: 0.95, accent: 'here', role: 'label' });
+    if (!o.print) texts.push({ text: 'aquí · here', arc: { x: d.x, y: d.y, r: r0 + size * 1.35, a }, size: size * 0.58, alpha: 0.55, accent: 'here', role: 'label-sub' });
   }
 
   // Reflections: a column of glints on the water straight below a light, spreading toward the
@@ -429,7 +468,7 @@ export function compose(c, o = {}) {
   };
   const glints = [];
   if (moonMark && dark && moonMark.fraction > 0.2) glints.push(...column(moonMark.x, 1, 0.35 + 0.65 * moonMark.fraction, 'moon', 20));
-  if (hero) glints.push(...column(hero.x, reveal, 1, 'here', 0));
+  for (const d of dots.filter((x) => x.hero).slice(0, 3)) glints.push(...column(d.x, d.reveal, 1, 'here', hashString(String(d.v.id)) % 97));
 
   if (o.captions !== false) {
     const portrait = W < H * 1.3;
@@ -455,11 +494,17 @@ export function compose(c, o = {}) {
     }
   }
 
+  // The clearing: the sea parts around a group's welcome.
+  const sea = clearing ? cutOut([...lines, ...glints], clearing) : [...lines, ...glints];
+
   return {
     width: W, height: H, dark, horizon, edition: { n: ed.n, style, label: ed.label, palette: ed.palette.name },
     palette: { ...pal, visitor: pal.fg, sun: pal.fg, moon: pal.fg },
-    lines: [...weather, ...links, ...lines, ...glints, ...sparks], shapes, circles, texts,
-    hero: heroAt,
+    lines: [...weather, ...links, ...sea, ...sparks], shapes, circles, texts,
+    hero: heroAt[0] ?? null, heroes: heroAt,
+    sun: sunMark && { x: sunMark.x, y: sunMark.y, r: sunMark.r },
+    moon: moonMark && { x: moonMark.x, y: moonMark.y, r: moonMark.r },
+    margin: mx,
   };
 }
 
@@ -496,6 +541,36 @@ export function welcomeLine(w, c = {}, lang = 'es') {
 }
 
 /** The classic palette (Cal), for anything drawn without a composition. */
+const COUNT = {
+  es: ['una', 'dos', 'tres', 'cuatro', 'cinco', 'seis', 'siete', 'ocho', 'nueve', 'diez'],
+  en: ['one', 'two', 'three', 'four', 'five', 'six', 'seven', 'eight', 'nine', 'ten'],
+};
+
+/**
+ * Everything the welcome says, in Spanish with English beneath. One guest: their name and their
+ * own line. Several arriving together: all their names, and how many stars are new or returning.
+ */
+export function welcomeText(w, c = {}) {
+  const group = w.group?.length > 1 ? w.group : null;
+  if (!group) {
+    const back = (w.visits ?? 1) > 1 || w.greeting === 'Hola de nuevo';
+    return {
+      greeting: w.greeting ?? 'Bienvenido', greetingEn: back ? 'Welcome back' : 'Welcome',
+      title: w.name, line: welcomeLine(w, c, 'es'), lineEn: welcomeLine(w, c, 'en'),
+    };
+  }
+  const names = group.map((g) => g.name);
+  const title = names.length <= 5 ? names.join(' · ') : `${names.slice(0, 4).join(' · ')} · +${names.length - 4}`;
+  const fresh = group.filter((g) => (g.visits ?? 1) <= 1).length, back = group.length - fresh;
+  const n = (k, lang) => (k <= 10 ? COUNT[lang][k - 1] : String(k));
+  const es = [fresh && `${n(fresh, 'es')} ${fresh === 1 ? 'estrella nueva' : 'estrellas nuevas'}`, back && `${n(back, 'es')} ${back === 1 ? 'que vuelve' : 'que vuelven'}`];
+  const en = [fresh && `${n(fresh, 'en')} new ${fresh === 1 ? 'star' : 'stars'}`, back && `${n(back, 'en')} returning`];
+  return {
+    greeting: 'Bienvenidos', greetingEn: 'Welcome, everyone', title,
+    line: es.filter(Boolean).join(' · '), lineEn: en.filter(Boolean).join(' · '),
+  };
+}
+
 export const PALETTE = {
   light: { ...PALETTES[0].light, sun: PALETTES[0].light.fg, visitor: PALETTES[0].light.fg },
   dark: { ...PALETTES[0].dark, sun: PALETTES[0].dark.fg, visitor: PALETTES[0].dark.fg },
@@ -526,6 +601,17 @@ export function toSVG(comp) {
     out.push(`<circle cx="${c.x.toFixed(1)}" cy="${c.y.toFixed(1)}" r="${c.r.toFixed(1)}" opacity="${c.alpha}" ${c.fill ? `fill="${col(c.accent)}"` : `fill="none" stroke="${col(c.accent)}" stroke-width="${sw}"`}/>`);
   }
   for (const t of comp.texts) {
+    if (t.arc) {
+      // Names around their stars, letter by letter (widths estimated; SVG is the no-script view).
+      const chars = [...t.text], cw = t.size * 0.93, { x, y, r, a } = t.arc;
+      const over = Math.sin(a) <= 0.25, rr = over ? r : r + t.size, span = (chars.length * cw) / rr;
+      chars.forEach((ch, i) => {
+        const phi = over ? a - span / 2 + ((i + 0.5) * cw) / rr : a + span / 2 - ((i + 0.5) * cw) / rr;
+        const deg = ((over ? phi + Math.PI / 2 : phi - Math.PI / 2) * 180) / Math.PI;
+        out.push(`<text transform="translate(${(x + rr * Math.cos(phi)).toFixed(1)} ${(y + rr * Math.sin(phi)).toFixed(1)}) rotate(${deg.toFixed(1)})" font-size="${(t.size * 1.5).toFixed(1)}" text-anchor="middle" fill="${col(t.accent)}" opacity="${t.alpha}" font-family="'Cormorant Garamond', Georgia, serif"${t.italic ? ' font-style="italic"' : ''}>${esc(ch)}</text>`);
+      });
+      continue;
+    }
     out.push(`<text x="${t.x.toFixed(1)}" y="${t.y.toFixed(1)}" font-size="${(t.size * 1.5).toFixed(1)}" text-anchor="${{ left: 'start', center: 'middle', right: 'end' }[t.align]}" fill="${col(t.accent)}" opacity="${t.alpha}" font-family="'Cormorant Garamond', Georgia, serif"${t.italic ? ' font-style="italic"' : ''} letter-spacing="0.04em">${esc(t.text)}</text>`);
   }
   out.push('</svg>');

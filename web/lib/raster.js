@@ -176,6 +176,30 @@ export function rasterize(comp, colors = 2, opts = {}) {
     // Small sizes use the heavier cut so hairlines survive the 1-bit threshold.
     const key = t.italic ? 'italic' : t.size < 16 * scale ? 'caption' : 'regular';
     const tint = tintOf(t.accent);
+    if (t.arc) {
+      // Text on a circle (names around their stars): each glyph turned to follow the curve.
+      const gls = textGlyphs(t.text, 0, 0, t.size, 'left', key);
+      const last = gls[gls.length - 1];
+      const total = last ? last.x + last.g.adv * last.k : 0;
+      const { x, y, r, a } = t.arc;
+      const over = Math.sin(a) <= 0.25, rr = over ? r : r + t.size, span = total / rr;
+      for (const gl of gls) {
+        const adv = gl.g.adv * gl.k, mid = gl.x + adv / 2;
+        const phi = over ? a - span / 2 + mid / rr : a + span / 2 - mid / rr;
+        const rot = over ? phi + Math.PI / 2 : phi - Math.PI / 2, cs = Math.cos(rot), sn = Math.sin(rot);
+        const ox = x + rr * Math.cos(phi), oy = y + rr * Math.sin(phi);
+        fill(gl.g.contours.map((c) => {
+          const out = new Array(c.length);
+          for (let j = 0; j < c.length; j += 2) {
+            const lx = gl.x + c[j] * gl.k - mid, ly = c[j + 1] * gl.k;
+            out[j] = ox + lx * cs - ly * sn;
+            out[j + 1] = oy + lx * sn + ly * cs;
+          }
+          return out;
+        }), tint);
+      }
+      continue;
+    }
     for (const gl of textGlyphs(t.text, t.x, t.y, t.size, t.align, key)) {
       let ix = Math.floor(gl.x), iy = Math.floor(gl.y);
       let fx = Math.round((gl.x - ix) * 4), fy = Math.round((gl.y - iy) * 4);

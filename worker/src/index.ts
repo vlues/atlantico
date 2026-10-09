@@ -1,14 +1,16 @@
 import type { Env } from './env';
 import { json, cors, preflight } from './http';
-import { requireOwner, signIn, sessionHash, SESSION_MS, body, setSetting, getSetting, now, logAlert } from './util';
+import { requireOwner, signIn, sessionHash, SESSION_MS, body, setSetting, getSetting, now, logAlert, flag, setFlag } from './util';
 import { wallState, wallVersion, panelImage, panelPoll, liveSVG, liveHTML, bumpWall, SUN_PRESETS } from './wall';
 import { SCENARIOS } from './weather';
-import { arrive, demoArrive, deleteVisitor, endVisit, listVisitors, guestInfo, cleanName, type WifiSettings } from './guests';
-import { applyScene, saveGovee, SCENES, autoState } from './lights';
+import { arrive, demoArrive, deleteVisitor, endVisit, listVisitors, guestInfo, cleanName, lastOneOut, type WifiSettings } from './guests';
+import { applyScene, saveGovee, SCENES, autoState, adapterFor, spotlight, ZONES, type Zone } from './lights';
 import { plantStatus, listPlants, ensureSeeded, simulatorTick, fastForward, recordReading, type Rules } from './plants';
 import { createPairing, pairingStatus, pair, report, listDevices, updateDevice, removeDevice, offlineAlerts } from './devices';
 import { dailyCheck, telegram } from './check';
 import { firmwareCheck, firmwareImage } from './firmware';
+import { tourInfo, tourStop, playStop, STOPS } from './tour';
+import * as music from './music';
 // @ts-ignore — shared plain-JS module
 import { edition, STYLES } from '../../web/lib/art.js';
 
@@ -36,8 +38,12 @@ async function runCron(cron: string, env: Env) {
   if (cron === '30 7 * * *') { await dailyCheck(env); return; }
   if (env.SIMULATE === 'true') await simulatorTick(env);
   await wallState(env); // refreshes the live weather cache
-  if (((await env.STATE.get('scene')) ?? 'auto') === 'auto') await applyScene(env, 'auto');
+  // A tour that ended without its last stop: put the lamps back (normally they return within 30 s).
+  const lights = await env.STATE.get<{ spot?: string; at: number }>('lights:last', 'json');
+  if (lights?.spot && Date.now() - lights.at > 120000) await spotlight(env, null);
+  else if (((await flag(env, 'scene')) ?? 'auto') === 'auto') await applyScene(env, 'auto');
   await offlineAlerts(env);
+  await lastOneOut(env); // stays that simply ran out (six hours)
   // Keep a little over a year of readings.
   await env.DB.prepare('DELETE FROM readings WHERE ts < ?').bind(now() - 400 * 86400000).run();
 }
@@ -53,8 +59,17 @@ on('GET', '/api/wall', async (_r, env, _c, _m, url) => {
   const s = await wallState(env, url.searchParams.get('scenario'));
   return json({ ...s, simulate: env.SIMULATE === 'true' });
 });
-on('GET', '/api/wall/version', async (_r, env) =>
-  new Response(await wallVersion(env), { headers: { 'content-type': 'text/plain', 'cache-control': 'no-store' } }));
+on('GET', '/api/wall/version', async (_r, env, ctx) => {
+  ctx.waitUntil(music.tick(env).catch((e) => console.error('music', e))); // whose song is on (throttled)
+  return new Response(await wallVersion(env, true), { headers: { 'content-type': 'text/plain', 'cache-control': 'no-store' } });
+});
+on('GET', '/api/music', (_r, env, _c, _m, url) => music.overview(env, url));
+on('GET', '/api/music/search', (_r, env, _c, _m, url) => music.search(env, url));
+on('GET', '/api/music/suggest', (_r, env, ctx, _m, url) => music.suggest(env, url, ctx));
+on('POST', '/api/music/queue', (r, env, ctx) => music.queue(r, env, ctx));
+on('GET', '/api/music/callback', (r, env, _c, _m, url) => music.callback(r, env, url));
+on('GET', '/api/tour', (_r, env) => tourInfo(env));
+on('POST', '/api/tour', (r, env, ctx) => tourStop(r, env, ctx));
 on('GET', '/art/live', (_r, env, _c, _m, url) => liveHTML(url, env));
 on('GET', '/art/live.svg', (_r, env, _c, _m, url) => liveSVG(url, env));
 on('GET', '/art/panel.png', (r, env, _c, _m, url) => panelImage(r, url, env, 'png'));
@@ -76,6 +91,7 @@ on('GET', '/api/overview', async (_r, env) => overview(env), 'owner');
 on('POST', '/api/scene', async (r, env) => {
   const { scene } = await body<{ scene: string }>(r);
   if (!SCENES[scene]) return json({ error: 'unknown scene' }, 400);
+  await setFlag(env, 'scene:by', 'owner');
   const state = await applyScene(env, scene, { force: true });
   await bumpWall(env);
   return json({ scene, state });
@@ -121,11 +137,17 @@ on('POST', '/api/lights/govee', async (r, env) => {
   if (!b.apiKey) return json({ error: 'paste your Govee API key' }, 400);
   try {
     const res = await saveGovee(env, b.apiKey.trim(), b.bulbs ?? null);
-    if (res.saved) await applyScene(env, (await env.STATE.get('scene')) ?? 'auto', { force: true });
+    if (res.saved) await applyScene(env, (await flag(env, 'scene')) ?? 'auto', { force: true });
     return json(res);
   } catch (err) {
     return json({ error: `Govee said no: ${String(err).slice(0, 160)}` }, 400);
   }
+}, 'owner');
+on('PUT', '/api/lights/zones', async (r, env) => {
+  const b = await body<Record<string, Zone>>(r);
+  const zones = Object.fromEntries(Object.entries(b).filter(([, z]) => (ZONES as readonly string[]).includes(z)).slice(0, 50));
+  await setSetting(env, 'light:zones', zones);
+  return json({ ok: true, zones });
 }, 'owner');
 on('DELETE', '/api/lights/govee', async (_r, env) => {
   await env.DB.batch([
@@ -138,6 +160,10 @@ on('POST', '/api/check', async (_r, env) => json(await dailyCheck(env)), 'owner'
 on('POST', '/api/telegram/test', async (_r, env) =>
   json({ sent: await telegram(env, 'Atlántico: test message. Alerts will arrive here.') }), 'owner');
 on('POST', '/api/demo', (r, env, ctx) => demo(r, env, ctx), 'owner');
+on('PUT', '/api/music/spotify', (r, env) => music.connect(r, env), 'owner');
+on('DELETE', '/api/music/spotify', (_r, env) => music.disconnect(env), 'owner');
+on('GET', '/api/music/devices', (_r, env) => music.devices(env), 'owner');
+on('PUT', '/api/music/device', (r, env) => music.chooseDevice(r, env), 'owner');
 // Signed-in browsers: list them, sign this one out, or sign out everywhere.
 on('GET', '/api/sessions', async (r, env) => {
   const mine = await sessionHash(r);
@@ -157,8 +183,10 @@ on('DELETE', '/api/sessions', async (_r, env) => {
 async function route(req: Request, url: URL, env: Env, ctx: ExecutionContext): Promise<Response> {
   for (const [method, re, h, access] of routes) {
     if (method !== req.method) continue;
-    const m = url.pathname.match(re);
-    if (!m) continue;
+    const raw = url.pathname.match(re);
+    if (!raw) continue;
+    // Path parameters arrive percent-encoded ("luc%C3%ADa"): decode them before use.
+    const m = raw.map((x, i) => { if (!i) return x; try { return decodeURIComponent(x); } catch { return x; } }) as unknown as RegExpMatchArray;
     if (access === 'owner') {
       const denied = await requireOwner(req, env);
       if (denied) return denied;
@@ -170,21 +198,26 @@ async function route(req: Request, url: URL, env: Env, ctx: ExecutionContext): P
 
 async function overview(env: Env) {
   await ensureSeeded(env);
-  const [wall, plants, devices, alerts, visitors, lightsLast, checkLast, demoScenario, wifi, greeting, govee] = await Promise.all([
+  const [wall, plants, devices, alerts, visitors, lightsLast, checkLast, demoScenario, wifi, greeting, govee, lamps] = await Promise.all([
     wallState(env), plantStatus(env), listDevices(env),
     env.DB.prepare('SELECT * FROM alerts ORDER BY ts DESC LIMIT 60').all().then((r) => r.results),
     listVisitors(env),
     env.STATE.get('lights:last', 'json'), env.STATE.get('check:last', 'json'),
-    env.STATE.get('demo:scenario'),
+    flag(env, 'demo:scenario'),
     getSetting<WifiSettings | null>(env, 'wifi', null), getSetting(env, 'greeting', 'Bienvenido'),
     getSetting<any>(env, 'govee', null),
+    adapterFor(env),
   ]);
-  const today = edition(Date.now(), wall.style);
+  const today = edition(wall.editionDate, wall.style);
+  const coming = Array.from({ length: 8 }, (_, d) => { const e = edition(Date.now() + d * 86400000); return { day: d, n: e.n, style: e.style, palette: e.palette.name, label: e.label }; });
   return json({
     wall: { ...wall, visitors: wall.visitors.length, edition: { n: today.n, label: today.label, style: today.style, palette: today.palette.name } },
     scenes: Object.entries(SCENES).map(([id, s]) => ({ id, label: s.label })),
     autoState: autoState(env),
     lights: lightsLast,
+    bulbs: lamps.bulbs.map((b) => ({ id: b.id, name: b.name, zone: b.zone })),
+    music: await music.musicStatus(env),
+    zones: ZONES,
     plants, devices, alerts, visitors,
     check: checkLast,
     settings: {
@@ -201,7 +234,10 @@ async function overview(env: Env) {
       suns: ['live', ...Object.keys(SUN_PRESETS)],
       style: wall.style ?? 'today',
       styles: ['today', ...STYLES],
-      offline: JSON.parse((await env.STATE.get('demo:offline')) ?? '[]'),
+      day: Math.round((wall.editionDate - Date.now()) / 86400000),
+      coming,
+      stops: Object.keys(STOPS),
+      offline: JSON.parse((await flag(env, 'demo:offline')) ?? '[]'),
     },
   });
 }
@@ -211,19 +247,39 @@ async function demo(req: Request, env: Env, ctx: ExecutionContext): Promise<Resp
   const b = await body<{ action: string; value?: any }>(req);
   switch (b.action) {
     case 'scenario':
-      if (b.value === 'live' || !b.value) await env.STATE.delete('demo:scenario');
-      else if (SCENARIOS[b.value]) await env.STATE.put('demo:scenario', b.value);
+      if (b.value === 'live' || !b.value) await setFlag(env, 'demo:scenario', null);
+      else if (SCENARIOS[b.value]) await setFlag(env, 'demo:scenario', b.value);
       await bumpWall(env);
       return json({ ok: true });
     case 'sun':
-      if (b.value === 'live' || !SUN_PRESETS[b.value]) await env.STATE.delete('demo:sun');
-      else await env.STATE.put('demo:sun', b.value);
+      if (b.value === 'live' || !SUN_PRESETS[b.value]) await setFlag(env, 'demo:sun', null);
+      else await setFlag(env, 'demo:sun', b.value);
       await bumpWall(env);
       return json({ ok: true });
     case 'style':
-      if (!STYLES.includes(b.value)) await env.STATE.delete('demo:style');
-      else await env.STATE.put('demo:style', b.value);
+      await setFlag(env, 'demo:day', null);
+      if (!STYLES.includes(b.value)) await setFlag(env, 'demo:style', null);
+      else await setFlag(env, 'demo:style', b.value);
       await bumpWall(env);
+      return json({ ok: true });
+    case 'day': {
+      // Preview a coming day's edition (its style, palette and horizon), or 0 for today.
+      const n = Math.max(0, Math.min(30, Math.round(Number(b.value) || 0)));
+      await setFlag(env, 'demo:style', null);
+      if (n) await setFlag(env, 'demo:day', String(n)); else await setFlag(env, 'demo:day', null);
+      await bumpWall(env);
+      return json({ ok: true });
+    }
+    case 'tour': {
+      // One stop of the guest tour, as the most recent guest (the owner's button plays them in turn).
+      if (!(String(b.value) in STOPS)) return json({ error: 'unknown stop' }, 400);
+      const v = await env.DB.prepare('SELECT id, first_name, visits FROM visitors ORDER BY COALESCE(last_seen, created_at) DESC LIMIT 1').first<any>();
+      await playStop(env, ctx, { id: v?.id ?? null, name: v?.first_name ?? null, visits: v?.visits ?? 1 }, String(b.value));
+      return json({ ok: true });
+    }
+    case 'showcase':
+      // Every daily style in turn on the wall, for 40 seconds.
+      await playStop(env, ctx, { id: null, name: null, visits: 0 }, 'edition', true);
       return json({ ok: true });
     case 'arrive': {
       const name = cleanName(b.value) ?? 'Lucía';
@@ -248,10 +304,10 @@ async function demo(req: Request, env: Env, ctx: ExecutionContext): Promise<Resp
       return json({ ok: true });
     }
     case 'offline': {
-      const list: string[] = JSON.parse((await env.STATE.get('demo:offline')) ?? '[]');
+      const list: string[] = JSON.parse((await flag(env, 'demo:offline')) ?? '[]');
       const id = String(b.value);
       const next = list.includes(id) ? list.filter((x) => x !== id) : [...list, id];
-      await env.STATE.put('demo:offline', JSON.stringify(next));
+      await setFlag(env, 'demo:offline', JSON.stringify(next));
       if (!list.includes(id)) await env.DB.prepare('UPDATE devices SET last_seen = ? WHERE id = ? AND simulated = 1').bind(now() - 6 * 3600000, id).run();
       else await env.DB.prepare('UPDATE devices SET last_seen = ? WHERE id = ?').bind(now(), id).run();
       return json({ ok: true, offline: next });

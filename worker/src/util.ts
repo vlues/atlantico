@@ -103,6 +103,22 @@ export async function setSetting(env: Env, key: string, value: unknown) {
     .bind(key, JSON.stringify(value)).run();
 }
 
+// Small switches the screens must see at once (demo overrides, the light scene) live in D1, not
+// KV: KV can serve an old value for up to a minute after a change, so a press on the control page
+// seemed to do nothing until the next full refresh.
+export async function flag(env: Env, key: string): Promise<string | null> {
+  return getSetting<string | null>(env, key, null);
+}
+export async function setFlag(env: Env, key: string, value: string | null) {
+  if (value == null) await env.DB.prepare('DELETE FROM settings WHERE key = ?').bind(key).run();
+  else await setSetting(env, key, value);
+}
+/** Several settings in one query. */
+export async function settings(env: Env, keys: string[]): Promise<Record<string, any>> {
+  const r = await env.DB.prepare(`SELECT key, value FROM settings WHERE key IN (${keys.map(() => '?').join(',')})`).bind(...keys).all<{ key: string; value: string }>();
+  return Object.fromEntries(r.results.map((x) => [x.key, JSON.parse(x.value)]));
+}
+
 export async function body<T>(req: Request): Promise<T> {
   try { return (await req.json()) as T; } catch { return {} as T; }
 }

@@ -1,7 +1,8 @@
 // Canvas painter for compositions, plus the arrival moment: a shooting star crosses the sky,
 // lands where the guest's own star lives, and the star ignites. Shared by the wall and the
 // guest's phone so both play the same scene.
-import { PALETTE } from '../lib/art.js';
+import { PALETTE, STYLE_NAMES, compass } from '../lib/art.js';
+import { COPY } from '../lib/tour.js';
 
 const clamp01 = (v) => Math.max(0, Math.min(1, v));
 const ease = (v) => { const x = clamp01(v); return x * x * (3 - 2 * x); };
@@ -73,6 +74,11 @@ export function paint(ctx, comp, alpha = 1, e = null) {
     ctx.font = `${t.italic ? 'italic ' : ''}300 ${t.size * 1.5}px 'Cormorant Garamond', Georgia, serif`;
     ctx.letterSpacing = `${(t.size * 0.06).toFixed(1)}px`;
     ctx.fillStyle = col(t.accent);
+    if (t.arc) {
+      ctx.globalAlpha = alpha * t.alpha;
+      arcText(ctx, t);
+      continue;
+    }
     if (t.role === 'name' && e != null) {
       // Letter by letter, each rising a touch as it appears.
       const chars = [...t.text];
@@ -96,6 +102,32 @@ export function paint(ctx, comp, alpha = 1, e = null) {
   ctx.restore();
 }
 
+/**
+ * Text set on a circle around a point. Over the top of the circle it reads clockwise with the
+ * letters standing outward; underneath it reads the other way, so it is never upside down.
+ */
+export function arcText(ctx, t) {
+  const { x, y, r, a } = t.arc;
+  const chars = [...t.text];
+  const widths = chars.map((ch) => ctx.measureText(ch).width);
+  const total = widths.reduce((n, w) => n + w, 0);
+  const over = Math.sin(a) <= 0.25;
+  const rr = over ? r : r + t.size;
+  const span = total / rr;
+  ctx.textAlign = 'left';
+  let acc = 0;
+  chars.forEach((ch, i) => {
+    const mid = acc + widths[i] / 2;
+    acc += widths[i];
+    const phi = over ? a - span / 2 + mid / rr : a + span / 2 - mid / rr;
+    ctx.save();
+    ctx.translate(x + rr * Math.cos(phi), y + rr * Math.sin(phi));
+    ctx.rotate(over ? phi + Math.PI / 2 : phi - Math.PI / 2);
+    ctx.fillText(ch, -widths[i] / 2, 0);
+    ctx.restore();
+  });
+}
+
 // A small deterministic random, so each arrival (seeded by when it happened) flies its own path.
 const rnd = (seed, k) => {
   let h = Math.imul((seed | 0) ^ Math.imul(k, 0x9e3779b1), 0x85ebca6b);
@@ -107,8 +139,8 @@ const rnd = (seed, k) => {
  * The shooting star and the ignition, drawn over a composition that has a `hero`.
  * `seed` makes every arrival its own: where the meteor comes from, how it curves, how many rings.
  */
-export function arrival(ctx, comp, e, seed = 0) {
-  const h = comp.hero;
+export function arrival(ctx, comp, e, seed = 0, target = comp.hero) {
+  const h = target;
   if (!h || e == null || e > LAND_S + 3.4) return;
   const W = comp.width, H = comp.height, S = Math.min(W, H);
   const gold = (comp.palette ?? (comp.dark ? PALETTE.dark : PALETTE.light)).here;
@@ -169,5 +201,167 @@ export function arrival(ctx, comp, e, seed = 0) {
       ctx.beginPath(); ctx.arc(h.x, h.y, S * (0.012 + 0.2 * Math.pow(k, 0.7)), 0, Math.PI * 2); ctx.stroke();
     }
   }
+  ctx.restore();
+}
+
+// ── The guest tour on the wall ───────────────────────────────────────────────
+// While a guest scrolls the story on their phone, the wall shows the same stop: its title in the
+// sky and a few hairline callouts pointing at what the phone is describing.
+
+function callout(ctx, comp, at, to, text, sub, e, p) {
+  const S = Math.min(comp.width, comp.height), sw = Math.max(0.7, S / 1100);
+  const grow = ease(e / 0.9), fade = ease((e - 0.6) / 0.8);
+  ctx.strokeStyle = ctx.fillStyle = p.here;
+  ctx.lineWidth = sw;
+  ctx.globalAlpha = 0.9;
+  ctx.beginPath(); ctx.arc(at.x, at.y, S * 0.006, 0, Math.PI * 2); ctx.stroke();
+  ctx.beginPath();
+  ctx.moveTo(at.x, at.y);
+  ctx.lineTo(at.x + (to.x - at.x) * grow, at.y + (to.y - at.y) * grow);
+  ctx.stroke();
+  if (fade <= 0) return;
+  const size = S * 0.022, left = to.x >= at.x;
+  ctx.globalAlpha = fade;
+  ctx.textAlign = left ? 'left' : 'right';
+  ctx.font = `italic 300 ${size * 1.5}px 'Cormorant Garamond', Georgia, serif`;
+  ctx.fillText(text, to.x + (left ? 1 : -1) * S * 0.01, to.y + size * 0.4);
+  if (sub) {
+    ctx.globalAlpha = fade * 0.7;
+    ctx.font = `300 ${size * 1.05}px 'Cormorant Garamond', Georgia, serif`;
+    ctx.fillText(sub, to.x + (left ? 1 : -1) * S * 0.01, to.y + size * 1.9);
+  }
+}
+
+/**
+ * Draw one tour stop over the wall. `e` = seconds since the stop began; `c` = conditions;
+ * `extra` = { style } for the editions stop.
+ */
+export function tourOverlay(ctx, comp, tour, e, c = {}, extra = {}) {
+  const W = comp.width, H = comp.height, S = Math.min(W, H);
+  const p = comp.palette ?? (comp.dark ? PALETTE.dark : PALETTE.light);
+  const copy = COPY[tour.stop];
+  if (!copy) return;
+  ctx.save();
+  ctx.letterSpacing = '0px';
+  // The title, as on the phone, in a band the sea opens at its foot (the sky stays for the stars).
+  const tA = ease(e / 1.2) * (tour.until && Date.now() > tour.until - 1500 ? ease((tour.until - Date.now()) / 1500) : 1);
+  const ty = H * 0.84 - S * 0.075, ts = S * 0.042;
+  ctx.font = `italic 300 ${ts * 1.5}px 'Cormorant Garamond', Georgia, serif`;
+  const tw = Math.max(ctx.measureText(copy.es).width, S * 0.3) + S * 0.12;
+  ctx.globalAlpha = 0.94 * tA;
+  ctx.fillStyle = p.bg;
+  ctx.fillRect(W / 2 - tw / 2, ty - ts * 1.6, tw, ts * 3.2);
+  ctx.fillStyle = p.fg;
+  ctx.textAlign = 'center';
+  ctx.globalAlpha = 0.92 * tA;
+  ctx.fillText(copy.es, W / 2, ty);
+  ctx.globalAlpha = 0.6 * tA;
+  ctx.font = `300 ${S * 0.017 * 1.5}px 'Cormorant Garamond', Georgia, serif`;
+  ctx.fillText(copy.en, W / 2, ty + ts * 1.1);
+
+  const seaY = (f) => comp.horizon + (H * 0.84 - comp.horizon) * f;
+  ctx.globalAlpha = 1;
+  if (tour.stop === 'sea') {
+    callout(ctx, comp, { x: W * 0.3, y: seaY(0.5) }, { x: W * 0.42, y: seaY(0.28) },
+      `olas ${(c.waveHeight ?? 0).toFixed(1)} m, cada ${Math.round(c.wavePeriod ?? 0)} s`, `waves ${(c.waveHeight ?? 0).toFixed(1)} m, every ${Math.round(c.wavePeriod ?? 0)} s, from the ${compass(c.waveDirection ?? 0)}`, e, p);
+    callout(ctx, comp, { x: W * 0.72, y: comp.horizon }, { x: W * 0.62, y: comp.horizon - S * 0.07 },
+      'el horizonte sigue la marea', `the horizon follows the tide: ${(c.tide ?? 0) >= 0 ? '+' : ''}${(c.tide ?? 0).toFixed(2)} m${c.tideTrend ? `, ${c.tideTrend}` : ''}`, Math.max(0, e - 0.8), p);
+  } else if (tour.stop === 'star' && comp.hero) {
+    // Their star calls out: rings keep opening from it.
+    for (let i = 0; i < 3; i++) {
+      const k = ((e + i * 0.55) % 1.65) / 1.65;
+      ctx.globalAlpha = (1 - k) * 0.7;
+      ctx.strokeStyle = p.here;
+      ctx.lineWidth = Math.max(0.7, S / 1100) * 1.2;
+      ctx.beginPath(); ctx.arc(comp.hero.x, comp.hero.y, S * (0.015 + 0.09 * k), 0, Math.PI * 2); ctx.stroke();
+    }
+    ctx.globalAlpha = 1;
+    const right = comp.hero.x < W * 0.6;
+    callout(ctx, comp, comp.hero, { x: comp.hero.x + (right ? 1 : -1) * S * 0.12, y: comp.hero.y + S * 0.08 },
+      tour.name ? `${tour.name}` : 'tu estrella', tour.visits > 1 ? `${tour.visits} visitas · ${tour.visits} visits` : 'desde hoy · since today', e, p);
+  } else if (tour.stop === 'edition' && extra.style) {
+    ctx.fillStyle = p.here;
+    ctx.textAlign = 'center';
+    ctx.globalAlpha = 0.95;
+    ctx.font = `300 ${S * 0.032 * 1.5}px 'Cormorant Garamond', Georgia, serif`;
+    ctx.fillText(STYLE_NAMES[extra.style] ?? extra.style, W / 2, H * 0.84 - S * 0.17);
+  } else if (tour.stop === 'sky') {
+    const body = comp.moon ?? comp.sun;
+    if (body) {
+      ctx.strokeStyle = p.here;
+      ctx.globalAlpha = 0.5 + 0.3 * Math.sin(e * 3);
+      ctx.lineWidth = Math.max(0.7, S / 1100) * 1.2;
+      ctx.beginPath(); ctx.arc(body.x, body.y, body.r * 2.2, 0, Math.PI * 2); ctx.stroke();
+      ctx.globalAlpha = 1;
+      const right = body.x < W * 0.6;
+      const m = c.moon;
+      callout(ctx, comp, { x: body.x + (right ? 1 : -1) * body.r * 2.2, y: body.y }, { x: body.x + (right ? 1 : -1) * S * 0.14, y: body.y + S * 0.05 },
+        comp.moon ? m?.name ?? 'la luna' : 'el sol', comp.moon && m ? `${m.nameEn ?? 'moon'}, ${Math.round(m.fraction * 100)} % lit` : `the sun, ${Math.round(c.sun?.altitude ?? 0)}° high`, e, p);
+    }
+    if (c.seaTemp != null) {
+      callout(ctx, comp, { x: W * 0.36, y: seaY(0.45) }, { x: W * 0.44, y: seaY(0.25) }, `el agua, ${Math.round(c.seaTemp)} °C`, 'the sea temperature', Math.max(0, e - 0.9), p);
+    }
+  }
+  ctx.restore();
+}
+
+/** A guest tapping out: their goodbye in the band at the foot of the sea, for a few seconds. */
+export function farewellOverlay(ctx, comp, fw, e) {
+  band(ctx, comp, `Hasta pronto, ${fw.name}`, 'See you soon', ease(e / 1.2) * ease((fw.until - Date.now()) / 1500));
+}
+
+/**
+ * A guest's song comes on: whose it is, in the band (and who is next, if it's someone's too),
+ * while their star calls out with opening rings. Afterwards a small line keeps saying whose it is.
+ */
+export function musicOverlay(ctx, comp, m, e) {
+  const W = comp.width, S = Math.min(W, comp.height);
+  const p = comp.palette ?? (comp.dark ? PALETTE.dark : PALETTE.light);
+  const a = ease(e / 1.2) * ease((25 - e) / 1.5);
+  if (a > 0) {
+    band(ctx, comp, `♪ La canción de ${m.by.name}`, `${m.by.name}'s song · ${m.title} — ${m.artist}${m.next ? ` · next: ${m.next.by}'s` : ''}`, a);
+    if (comp.hero) {
+      ctx.save();
+      for (let i = 0; i < 3; i++) {
+        const k = ((e + i * 0.55) % 1.65) / 1.65;
+        ctx.globalAlpha = (1 - k) * 0.7 * a;
+        ctx.strokeStyle = p.here;
+        ctx.lineWidth = Math.max(0.7, S / 1100) * 1.2;
+        ctx.beginPath(); ctx.arc(comp.hero.x, comp.hero.y, S * (0.015 + 0.09 * k), 0, Math.PI * 2); ctx.stroke();
+      }
+      ctx.restore();
+    }
+  }
+  // For the rest of the song: a quiet line under the edition.
+  ctx.save();
+  ctx.globalAlpha = 0.75 * ease((e - 20) / 2);
+  ctx.fillStyle = p.here;
+  ctx.textAlign = 'right';
+  ctx.font = `italic 300 ${Math.max(9, S * 0.017) * 1.5}px 'Cormorant Garamond', Georgia, serif`;
+  ctx.fillText(`♪ ${m.title} · de ${m.by.name}`, W - (comp.margin ?? W * 0.085), comp.height * 0.075 + S * 0.035);
+  ctx.restore();
+}
+
+function band(ctx, comp, title, sub, a) {
+  if (a <= 0) return;
+  const W = comp.width, H = comp.height, S = Math.min(W, H);
+  const p = comp.palette ?? (comp.dark ? PALETTE.dark : PALETTE.light);
+  const ty = H * 0.84 - S * 0.075, ts = S * 0.042, text = title;
+  ctx.save();
+  ctx.letterSpacing = '0px';
+  ctx.font = `300 ${S * 0.017 * 1.5}px 'Cormorant Garamond', Georgia, serif`;
+  const subW = ctx.measureText(sub).width;
+  ctx.font = `italic 300 ${ts * 1.5}px 'Cormorant Garamond', Georgia, serif`;
+  const tw = Math.max(ctx.measureText(text).width, subW) + S * 0.12;
+  ctx.globalAlpha = 0.94 * a;
+  ctx.fillStyle = p.bg;
+  ctx.fillRect(W / 2 - tw / 2, ty - ts * 1.6, tw, ts * 3.2);
+  ctx.fillStyle = p.here;
+  ctx.textAlign = 'center';
+  ctx.fillText(text, W / 2, ty);
+  ctx.globalAlpha = 0.6 * a;
+  ctx.fillStyle = p.fg;
+  ctx.font = `300 ${S * 0.017 * 1.5}px 'Cormorant Garamond', Georgia, serif`;
+  ctx.fillText(sub, W / 2, ty + ts * 1.1);
   ctx.restore();
 }

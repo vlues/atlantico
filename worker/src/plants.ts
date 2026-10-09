@@ -1,6 +1,6 @@
 // Plants: per-plant rules, readings, watering decisions, and the simulator.
 import type { Env } from './env';
-import { now, logAlert } from './util';
+import { now, logAlert, flag } from './util';
 
 export interface Rules {
   waterBelow: number;        // % soil moisture that triggers watering
@@ -140,7 +140,7 @@ export async function simulatorTick(env: Env, to = now()) {
   const simIds = new Set(sim.results.map((d) => d.id));
   for (const p of plants) if (p.device_id && simIds.has(p.device_id)) await simulatePlant(env, p, to);
   await env.DB.prepare('UPDATE devices SET last_seen = ? WHERE simulated = 1 AND id NOT IN (SELECT value FROM json_each(?))')
-    .bind(to, JSON.stringify(JSON.parse((await env.STATE.get('demo:offline')) ?? '[]'))).run();
+    .bind(to, JSON.stringify(JSON.parse((await flag(env, 'demo:offline')) ?? '[]'))).run();
 }
 
 /** Demo: run the plants forward by `hours` (history is shifted back so "now" stays now). */

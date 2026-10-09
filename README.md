@@ -14,7 +14,27 @@ A quiet smart-apartment system for a flat in Fuentebravía (El Puerto de Santa M
 - **Guest arrival.** Guests tap an NFC tag or scan a QR code and type their first name. Each guest gets their own star in the sky of the wall piece, and the lights go to Hosting. They also get the Wi-Fi.
   - **On arrival:** for 30 seconds, every screen plays the arrival. A shooting star lands on the guest's star, it ignites and reflects on the sea, and their name appears with a personal line. A first visit reads *tu estrella, desde hoy · llegas con levante*; a return reads *tercera visita · la anterior, hace 12 días*.
   - **Remembering guests:** the guest's phone remembers them. Next time, tapping the tag is the whole check-in, with no typing and no buttons.
-  - **While they're here:** for six hours after they tap in, their star sparkles in gold with their first name beside it. Regulars' stars burn slightly brighter.
+  - **While they're here:** for six hours after they tap in, their star sparkles in gold. Their first name curves around it, with a small *aquí · here*, and sways slowly at its own pace (different for every star, every day). Regulars' stars burn slightly brighter.
+  - **Arriving together:** people who tap in close together share one welcome: *Bienvenidos · Welcome, everyone*, all their names, and *dos estrellas nuevas · una que vuelve*.
+    - Every star gets its own entrance, a beat apart.
+    - The sea opens a clearing for the names, so the arriving stars stay in view.
+    - Someone joining a welcome that is already playing doesn't restart it for the others.
+  - **Spanish first, English beneath,** on the wall and on the phone.
+  - **Tap in, tap out.** Tapping the door tag again on the way out, 45 minutes or more into a stay, says goodbye.
+    - The guest's phone shows *Hasta pronto*, with a one-tap *Me quedo* undo. The wall shows the goodbye too.
+    - When the last guest leaves, lights that guests switched to Hosting go back to Auto.
+    - Guests who don't tap out stop shining after six hours.
+  - **Music, no sign-in.** After checking in, guests can add songs to the room from their phone:
+    - search, or paste a link from Spotify, Apple Music or YouTube (it's matched to the same song on Spotify);
+    - or press *Sorpréndeme* for five songs, chosen by Claude, that follow what's playing.
+    - When a guest's song comes on, the wall shows *La canción de Ana* (and whose is next), their star pulses, and the lamps by the wall breathe once. The guest's phone says it's theirs, and vibrates on Android.
+    - Each guest can have up to three songs waiting.
+  - **The first-arrival tour.** After checking in, the guest's phone tells the story of the flat, one stop per screen: the sea, their star, the day's drawing, the real sky, the plants and the light.
+    - As each stop scrolls into view, the wall shows it too. The sea gets callouts, their star pulses, all five styles pass by, and the moon is circled.
+    - The lamps near what's being described brighten while the rest dim. For the light stop, the whole room goes from noon to dusk.
+    - Sound is opt-in, with one tap: surf and soft chimes on the phone, and an arrival chime on the wall once someone has tapped it.
+    - The lamps return to the scene on their own about 30 seconds after the last stop.
+    - If several guests tour at once, the first one leads the wall and lamps, and the others still get the full story on their phones.
 - **Light scenes.** Hosting, Evening, Focus and Off, plus Auto, which follows sunrise and sunset. A simulator runs today, and Govee bulbs connect with just an API key.
 - **Plants.** There are four: an olive tree, a *Strelitzia nicolai*, a snake plant and a ZZ plant. Each has its own watering rules. Claude checks them every morning and writes one dry line per plant. You only hear about it, via Telegram, when something needs you.
 - **Control page.** Owner only. It shows everything above, plus devices and alerts. You sign in once per browser, and it stays signed in.
@@ -45,7 +65,8 @@ The **Demo** panel on the control page lets you:
 
 - force a sea state (calm, poniente, levante, storm) or return to **live**
 - pin the sun to sunrise, noon, sunset or night
-- preview any of the daily styles, then return to today's edition
+- show every daily style on the wall in turn, preview any of the next week's editions, or force one style
+- play the guest tour on the wall and lamps, stop by stop
 - "ring the bell" as a guest (a name already on the wall, such as Lucía, arrives as a returning guest)
 - dry out a plant, or empty or refill a reservoir
 - fast-forward the plants a day or a week
@@ -114,6 +135,15 @@ On Cloudflare's free plan a request may use 10 ms of CPU. Rendering a panel imag
 
 Open **Control → Add device** in **Chrome or Edge** on your Mac. Safari can't talk to USB.
 
+The page starts with **What to get**: a checklist with search links. Ticks are remembered in that browser.
+- **Start here** needs no tools: the Seeed XIAO 7.5″ ePaper Panel, Govee bulbs, NFC stickers and chargers.
+- **Plants:** essentials (sensor, pump, switch, reservoir) and optional extras (temperature, reservoir level). They connect with jumper wires and screw terminals, so no soldering.
+
+Each device then takes three steps:
+1. Plug it in.
+2. Press **Install** and pick your Wi-Fi.
+3. Close the window. **It pairs itself.**
+
 ### Wall panel (e-ink)
 
 1. Pick **Wall panel** and the board, either the Seeed XIAO 7.5″ or the 7.3″ Spectra 6 colour panel.
@@ -121,7 +151,7 @@ Open **Control → Add device** in **Chrome or Edge** on your Mac. Safari can't 
    - **USB:** welcomes appear within about 20 seconds.
    - **Battery:** the panel updates every 15 minutes.
 3. Plug the board into the Mac with a USB-C **data** cable and press **Install**. The page flashes the firmware, then asks for your Wi-Fi (this is Improv Wi-Fi).
-4. Close the install window and press **Pair**. The page sends a one-time code over the same cable. The panel contacts the Worker and gets its own token, and the simulated panel disappears from the device list.
+4. Close the install window. The page sends a one-time code over the same cable by itself, because Chrome remembers the port it just flashed. The panel contacts the Worker and gets its own token, and the simulated panel disappears from the device list. If nothing happens, press **Pair**.
 
 If Wi-Fi drops, the panel keeps showing the last image. E-paper needs no power to hold a picture.
 
@@ -144,13 +174,27 @@ These steps are the same as for the panel. The difference is that you choose **w
 ### Lights (Govee)
 
 1. In the Govee Home app, go to *Profile › Settings › Apply for API Key*. The key arrives by email.
-2. On **Add device → Lights**, paste the key, press **Find bulbs**, tick the ones you want, and press **Use these bulbs**.
+2. On **Add device → Lights**, paste the key and press **Find bulbs**. Tick the ones you want and say where each one is (by the wall, by the plants, by the sofa or elsewhere). Then press **Use these bulbs**.
+   - The guest tour uses those positions. You can change them later under **Control → Light → Where each lamp is**.
+   - Lamps are only sent what changed, because Govee allows a few requests per bulb per minute.
 
 Adding another brand means writing one small adapter object in `worker/src/lights.ts` that implements `LightAdapter`'s `list()` and `set()`.
 
 ### Guests: NFC tag and QR code
 
-- Write the guest page URL (`…/hola`) to an NFC sticker as a **URL record**, using an app such as *NFC Tools*. Print the same URL as a QR code for phones without NFC.
+- Write the guest page URL with `?door` on the end (`…/hola?door`) to an NFC sticker as a **URL record**, using an app such as *NFC Tools*. Print the same URL as a QR code for phones without NFC.
+  - `?door` is what makes tapping out work. Opening the page any other way, for example from history to see the Wi-Fi again, never signs anyone out.
+
+#### How arriving and leaving work
+
+- **Arriving:**
+  - The first time, a guest taps the tag (or scans the code) and types their first name. Their phone remembers them from then on.
+  - Every visit after that, tapping the tag *is* the check-in, with no typing and no buttons.
+  - If the phone has forgotten them, typing the same name finds their star again.
+- **Being here:** for six hours after a tap, their star shines gold with their name. The guest tour and the music section are open to them.
+- **Leaving:** they can tap the tag on the way out (after 45 minutes or more), or simply go; their star stops shining after six hours. You can also end a visit from **Control → Guests**.
+- **Nothing tracks phones in the background.** There's no location, no Wi-Fi sniffing and no Bluetooth. Only the tap.
+- **What to set up:** the sticker by the door, the Wi-Fi details under **Control → Guests**, and, if you want music, **Control → Music** once.
 - **Returning guests** (all automatic, nothing to answer):
   - The guest's phone keeps a small key. Opening the page on that phone checks them in by itself.
   - If the phone has forgotten them (Safari clears site data after about a week without a visit), they type their first name and it joins their existing star.
@@ -276,6 +320,22 @@ GitHub Pages (static)                Cloudflare Worker (TypeScript)           De
   - The control page then opens like an app.
   - Home-screen apps keep their storage, while Safari tabs lose site data after about a week without a visit. So this is what keeps an iPhone signed in for good.
   - The wall installs the same way and opens full screen, which suits a tablet on the wall.
+
+### Music (Spotify, once)
+
+You need **Spotify Premium** on the account that plays in the flat, and any Spotify Connect speaker (Sonos, Echo, a TV, or the Mac itself).
+
+1. Go to **Control → Music** and follow its three steps:
+   - create a free app at developer.spotify.com and tick **Web API**;
+   - paste the redirect URI the page shows;
+   - paste the app's Client ID and Client secret, then press **Connect Spotify** and approve.
+2. Optionally press **Choose the room's speaker**. Guests' songs then start there when nothing is playing.
+
+**Guests:**
+- Guests never sign in. Their songs join your queue.
+- Apple Music has no way for a website to queue songs on a speaker, so Apple Music links are matched to the same song on Spotify.
+- Without a Claude key, *Sorpréndeme* suggests more by the artist that's playing.
+- Spotify's development mode only needs the owner's account. Search returns at most 10 results (Spotify's 2026 limit), and this uses 5.
 
 ## Maintenance
 

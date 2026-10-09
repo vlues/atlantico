@@ -95,6 +95,7 @@ function render() {
   renderAlerts();
   renderGuests();
   renderConnections();
+  renderMusic();
   if (view !== 'web') refreshInk();
 }
 
@@ -111,12 +112,21 @@ function renderSource() {
 }
 
 function renderScenes() {
+  if (!$('zones').contains(document.activeElement)) {
+    $('zones').innerHTML = data.bulbs.map((b) => `<div><span class="grow">${esc(b.name)}</span>
+      <select data-zone="${esc(b.id)}">${data.zones.map((z) => `<option value="${z}" ${z === b.zone ? 'selected' : ''}>${{ wall: 'by the wall', plants: 'by the plants', sofa: 'by the sofa', none: 'elsewhere' }[z]}</option>`).join('')}</select></div>`).join('');
+  }
   const current = data.wall.scene;
   $('scenes').innerHTML = data.scenes.map((s) => `<button class="btn ${s.id === current ? 'on' : ''}" data-scene="${s.id}">${esc(s.label)}</button>`).join('');
   const l = data.lights?.state;
   const a = current === 'auto' ? ' · follows sunrise and sunset' : '';
   $('lightstate').textContent = l ? `${l.on ? `${l.kelvin} K · ${l.brightness}%` : 'off'} · ${data.lights.adapter}${a}` : a;
 }
+$('zones').addEventListener('change', async () => {
+  const zones = Object.fromEntries([...$('zones').querySelectorAll('[data-zone]')].map((s) => [s.dataset.zone, s.value]));
+  try { await api('/api/lights/zones', { method: 'PUT', owner: true, body: zones }); toast('Saved'); document.activeElement.blur(); refresh(); }
+  catch (err) { toast(err.message); }
+});
 $('scenes').addEventListener('click', (e) => {
   const s = e.target.closest('[data-scene]')?.dataset.scene;
   if (s) act('/api/scene', { scene: s }, `Scene: ${s}`);
@@ -195,6 +205,7 @@ function renderDemo() {
   chips($('d-sea'), d.scenarios, d.scenario, 'sea');
   chips($('d-sun'), d.suns, d.sun, 'sun');
   chips($('d-style'), d.styles, d.style, 'style');
+  $('d-days').innerHTML = d.coming.map((x) => `<button class="btn small ${x.day === d.day && d.style === 'today' ? 'on' : ''}" data-day="${x.day}" title="${esc(x.label)}">${x.day === 0 ? 'Today' : `Nº ${x.n}`} · ${esc(x.style)} · ${esc(x.palette)}</button>`).join('');
   const sel = $('d-plant');
   if (!sel.options.length) sel.innerHTML = data.plants.map((p) => `<option value="${p.id}">${esc(p.name)}</option>`).join('');
   const sims = data.devices.filter((x) => x.simulated).length;
@@ -204,6 +215,26 @@ function renderDemo() {
 }
 $('d-sea').addEventListener('click', (e) => { const v = e.target.dataset.sea; if (v) act('/api/demo', { action: 'scenario', value: v }, `Sea: ${v}`); });
 $('d-sun').addEventListener('click', (e) => { const v = e.target.dataset.sun; if (v) act('/api/demo', { action: 'sun', value: v }, `Sun: ${v}`); });
+$('d-days').addEventListener('click', (e) => {
+  const v = e.target.closest('[data-day]')?.dataset.day;
+  if (v != null) act('/api/demo', { action: 'day', value: Number(v) }, v === '0' ? "Back to today's edition" : 'Previewing that day on the wall');
+});
+$('d-showcase').addEventListener('click', () => act('/api/demo', { action: 'showcase' }, 'Every style in turn, on the wall, for 40 seconds'));
+// The guest tour, played from here: each stop for seven seconds, then the lamps settle back.
+let touring = false;
+$('d-tour').addEventListener('click', async (e) => {
+  if (touring) return;
+  touring = true;
+  e.target.disabled = true;
+  for (const stop of data.demo.stops) {
+    $('d-tourstate').textContent = `now: ${stop}`;
+    await api('/api/demo', { method: 'POST', owner: true, body: { action: 'tour', value: stop } }).catch((err) => toast(err.message));
+    if (stop !== 'end') await new Promise((r) => setTimeout(r, stop === 'edition' ? 15000 : 7000));
+  }
+  $('d-tourstate').textContent = 'done · the lamps are back to the scene';
+  e.target.disabled = false;
+  touring = false;
+});
 $('d-style').addEventListener('click', (e) => { const v = e.target.dataset.style; if (v) act('/api/demo', { action: 'style', value: v }, v === 'today' ? "Back to today's edition" : `Previewing: ${v}`); });
 $('d-arrive').addEventListener('click', () => act('/api/demo', { action: 'arrive', value: $('d-name').value || 'Lucía' },
   (r) => `${r.returning ? `Welcome back, ${r.name} · visit ${r.visits}` : `Welcome, ${r.name} · new star`} · on every screen for 30 s · Hosting scene on`));
@@ -291,6 +322,58 @@ $('wifi').addEventListener('submit', async (e) => {
     refresh();
   } catch (err) { toast(err.message); }
 });
+
+// ── Music: connect Spotify once; guests add songs from their phones without signing in ────────
+let musicDrawn = null;
+function renderMusic() {
+  const m = data.music;
+  const np = m.now;
+  $('musicstate').textContent = m.connected ? `Spotify · ${m.device ? `plays on ${m.device}` : 'plays on whatever speaker is on'}${np ? ` · now: ${np.title}${np.by ? ` (${np.by.name}'s)` : ''}` : ''}` : 'not connected';
+  const mode = m.connected ? 'on' : 'off';
+  if (musicDrawn === mode || $('musicbody').contains(document.activeElement)) return;
+  musicDrawn = mode;
+  const redirect = `${API}/api/music/callback`;
+  $('musicbody').innerHTML = m.connected ? `
+    <p class="small muted">Guests see a Music section after they check in: search, paste a link from Spotify, Apple Music or YouTube, or ask for a suggestion. When a guest's song comes on, the wall says whose it is and the lamps by the wall breathe once.</p>
+    <div class="row"><button class="btn small" id="mdev">Choose the room's speaker</button><span class="small muted">used when nothing is playing</span>
+      <button class="btn quiet small" id="mdisc">Disconnect</button></div>
+    <div class="list" id="mdevices" style="margin-top:12px"></div>`
+    : `<ol class="small" style="line-height:1.9;padding-left:1.2em;margin:0 0 16px">
+      <li>On <a href="https://developer.spotify.com/dashboard" target="_blank" rel="noopener">developer.spotify.com/dashboard ↗</a>, sign in with the Spotify account that plays in the flat (Premium) and press <b>Create app</b>.</li>
+      <li>Any name; tick <b>Web API</b>; add this <b>Redirect URI</b>: <code id="mredir">${esc(redirect)}</code> <button class="btn quiet small" id="mcopy" type="button">copy</button></li>
+      <li>Paste the app's Client ID and Client secret here, press Connect, and approve.</li></ol>
+    <form id="mform" class="row"><input type="text" name="clientId" placeholder="Client ID" style="flex:1;min-width:160px">
+      <input type="password" name="clientSecret" placeholder="Client secret" style="flex:1;min-width:160px">
+      <button class="btn small" type="submit">Connect Spotify</button></form>
+    <p class="small muted" style="margin-top:10px">Guests never sign in to anything. Play music in the flat from any Spotify Connect speaker (or this Mac) and their songs join the queue.</p>`;
+  $('mcopy')?.addEventListener('click', () => navigator.clipboard.writeText(redirect).then(() => toast('Copied')));
+  $('mform')?.addEventListener('submit', async (e) => {
+    e.preventDefault();
+    try {
+      const r = await api('/api/music/spotify', { method: 'PUT', owner: true, body: { clientId: e.target.clientId.value, clientSecret: e.target.clientSecret.value } });
+      location.href = r.url;
+    } catch (err) { toast(err.message); }
+  });
+  $('mdisc')?.addEventListener('click', async () => { await api('/api/music/spotify', { method: 'DELETE', owner: true }).catch((err) => toast(err.message)); musicDrawn = null; refresh(); });
+  $('mdev')?.addEventListener('click', async () => {
+    try {
+      const list = await api('/api/music/devices', { owner: true });
+      $('mdevices').innerHTML = list.map((d) => `<div><span class="grow">${esc(d.name)} <span class="small muted">${esc(d.type)}${d.active ? ' · playing' : ''}</span></span>
+        <button class="btn small" data-dev="${esc(d.id)}" data-name="${esc(d.name)}">Use this</button></div>`).join('') || '<div class="small muted">No speakers awake. Open Spotify on one, then try again.</div>';
+    } catch (err) { toast(err.message); }
+  });
+  $('mdevices')?.addEventListener('click', async (e) => {
+    const b = e.target.closest('[data-dev]');
+    if (!b) return;
+    await api('/api/music/device', { method: 'PUT', owner: true, body: { id: b.dataset.dev, name: b.dataset.name } }).catch((err) => toast(err.message));
+    toast(`Guests' songs will start on ${b.dataset.name} when nothing is playing`);
+    refresh();
+  });
+}
+{
+  const q = new URLSearchParams(location.search).get('music');
+  if (q) { toast(q === 'connected' ? 'Spotify connected' : `Spotify: ${q}`); history.replaceState(null, '', location.pathname + location.hash); }
+}
 
 function renderConnections() {
   const s = data.settings;

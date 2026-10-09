@@ -13,6 +13,14 @@
   <script type="module" src="https://unpkg.com/esp-web-tools@10.4.0/dist/web/install-button.js?module"></script>
   <style>
     .page { max-width: 720px; }
+    .howto ol { margin: 0 0 10px; padding-left: 1.2em; line-height: 1.9; }
+    .shop { margin: 8px 0 40px; border-top: 1px solid var(--line); border-bottom: 1px solid var(--line); padding: 14px 0; }
+    .shop h4 { font: italic 300 22px var(--serif); margin: 22px 0 4px; }
+    .shop .kitnote { color: var(--muted); font-size: 13px; margin: 0 0 10px; }
+    .shop label { display: grid; grid-template-columns: auto 1fr auto; gap: 4px 12px; align-items: baseline; padding: 8px 0; border-bottom: 1px solid var(--line); font-size: 14px; }
+    .shop label small { grid-column: 2 / 4; color: var(--muted); }
+    .shop label a { font-size: 11px; color: var(--muted); margin-right: 8px; }
+    .shop input:checked ~ span { text-decoration: line-through; color: var(--muted); }
     .types { display: grid; gap: 1px; background: var(--line); border: 1px solid var(--line); }
     @media (min-width: 640px) { .types { grid-template-columns: repeat(3, 1fr); } }
     .types button { background: var(--bg); border: 0; color: var(--fg); padding: 26px 20px; text-align: left; cursor: pointer; transition: background .5s var(--ease); }
@@ -41,6 +49,22 @@
       <a class="btn quiet small" href="control">← Control</a>
     </header>
 
+    <section class="howto">
+      <p class="eyebrow">Each device, about a minute</p>
+      <ol>
+        <li><b>Plug it into this Mac</b> with a USB-C <i>data</i> cable (Chrome or Edge).</li>
+        <li><b>Press Install</b> and pick your Wi-Fi when it asks.</li>
+        <li><b>Close the window.</b> It pairs itself and appears on the control page. Hang it up.</li>
+      </ol>
+      <p class="small muted">Lights need no cable: paste the Govee key, tick the bulbs, say where each one is. Devices update their own firmware after that.</p>
+    </section>
+
+    <details class="shop" id="shop">
+      <summary>What to get <span class="small muted" id="shopcount"></span></summary>
+      <div id="shoplist"></div>
+      <p class="small muted">Prices are rough (October 2026); check before buying. Everything runs on USB-C 5 V and needs no drilling. Links search Amazon.es, Amazon.com and the maker's shop.</p>
+    </details>
+
     <p class="eyebrow">1 · What are you adding?</p>
     <div class="types" id="types">
       <button data-type="panel"><h3>Wall panel</h3><small>E-ink frame showing Atlántico. ESP32 + e-paper.</small></button>
@@ -61,7 +85,7 @@
         <div>
           <h3>Plug in and install</h3>
           <p>Connect the board to this Mac with a USB-C data cable, then press Install. Chrome or Edge on a computer only.
-            After flashing, the same window asks for your Wi-Fi.</p>
+            After flashing, the same window asks for your Wi-Fi. Then just close it.</p>
           <div id="nobrowser" class="warnbox" hidden>This browser can't talk to USB devices. Open this page in Chrome or Edge on your Mac.</div>
           <div id="nofw" class="warnbox" hidden></div>
           <esp-web-install-button id="install">
@@ -74,8 +98,8 @@
       <div class="step" id="s-pair">
         <span class="n">4</span>
         <div>
-          <h3>Pair</h3>
-          <p>Once Wi-Fi is connected, close the install window and press Pair. The board stays plugged in. This sends a one-time code over USB and the device gets its own token.</p>
+          <h3>Pairs by itself</h3>
+          <p>When the install window closes, this page sends a one-time code over the same cable and the device gets its own token. Leave it plugged in for a few seconds. If nothing happens, press Pair.</p>
           <div class="row"><span class="code" id="code">······</span><span class="small muted" id="codeexp"></span></div>
           <div class="row" style="margin-top:14px"><button class="btn" id="pairbtn">Pair</button><span class="small muted" id="pairstate"></span></div>
           <div id="log"></div>
@@ -95,7 +119,8 @@
       <div class="step" id="s-bulbs">
         <span class="n">3</span>
         <div>
-          <h3>Pick bulbs</h3>
+          <h3>Pick bulbs, and where each one is</h3>
+          <p class="small muted">The guest tour lights the lamps near what it is describing.</p>
           <div class="bulbs" id="bulbs"></div>
           <div class="row" style="margin-top:16px"><button class="btn" id="gsave" disabled>Use these bulbs</button>
             <button class="btn quiet small" id="gremove">Disconnect Govee</button></div>

@@ -87,6 +87,10 @@
     <section>
       <h2>Light <small id="lightstate"></small></h2>
       <div class="scenes" id="scenes"></div>
+      <details style="margin-top:18px"><summary>Where each lamp is</summary>
+        <p class="small muted" style="margin:12px 0">The guest tour lights the part of the room it is talking about: the wall, the plants, or everything for the light stop.</p>
+        <div class="list" id="zones"></div>
+      </details>
     </section>
 
     <section>
@@ -99,7 +103,14 @@
       <p class="small muted" style="margin:0 0 22px" id="demonote"></p>
       <div class="row"><span class="label">Sea</span><div class="chips" id="d-sea"></div></div>
       <div class="row"><span class="label">Time of day</span><div class="chips" id="d-sun"></div></div>
+      <div class="row"><span class="label">Editions</span>
+        <button class="btn small" id="d-showcase">Show every style on the wall</button>
+        <span class="small muted">or preview a coming day:</span></div>
+      <div class="row"><span class="label"></span><div class="chips" id="d-days"></div></div>
       <div class="row"><span class="label">Daily style</span><div class="chips" id="d-style"></div></div>
+      <div class="row"><span class="label">Guest tour</span>
+        <button class="btn small" id="d-tour">Play the tour</button>
+        <span class="small muted" id="d-tourstate">the wall and the lamps run through each stop, as a guest's phone would</span></div>
       <div class="row"><span class="label">Guest arrives</span>
         <input type="text" id="d-name" placeholder="Lucía" maxlength="24" style="width:140px" title="A name already on the wall arrives as a returning guest">
         <button class="btn small" id="d-arrive">Ring the bell</button>
@@ -143,6 +154,11 @@
         </div>
         <div class="cell"><p class="eyebrow">Visitors</p><div class="list" id="visitors" style="max-height:340px;overflow:auto"></div></div>
       </div>
+    </section>
+
+    <section id="music">
+      <h2>Music <small id="musicstate"></small></h2>
+      <div id="musicbody"></div>
     </section>
 
     <section>
