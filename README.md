@@ -3,7 +3,10 @@
 A quiet smart-apartment system for a flat in Fuentebravía (El Puerto de Santa María, Cádiz).
 
 - **The wall piece.** Fine contour lines drawn from the real sea outside: swell, wind, tide and the sun's position. It shows on any screen and on an e-ink frame.
-- **Guest arrival.** Guests tap an NFC tag or scan a QR code and type their first name. The wall says *Bienvenido* for 30 seconds, the lights go to Hosting, a faint star is added for them, and they get the Wi-Fi.
+- **Guest arrival.** Guests tap an NFC tag or scan a QR code and type their first name. Each guest gets their own star in the sky of the wall piece, and the lights go to Hosting. They also get the Wi-Fi.
+  - **On arrival:** for 30 seconds, every screen plays the arrival. A shooting star lands on the guest's star, it ignites and reflects on the sea, and their name appears with a personal line. A first visit reads *tu estrella, desde hoy · llegas con levante*; a return reads *tercera visita · la anterior, hace 12 días*.
+  - **Remembering guests:** the guest's phone remembers them, so next time they tap once (or not at all; see the NFC section).
+  - **While they're here:** for six hours after they tap in, their star sparkles in gold with their first name beside it. Regulars' stars burn slightly brighter.
 - **Light scenes.** Hosting, Evening, Focus and Off, plus Auto, which follows sunrise and sunset. A simulator runs today, and Govee bulbs connect with just an API key.
 - **Plants.** There are four: an olive tree, a *Strelitzia nicolai*, a snake plant and a ZZ plant. Each has its own watering rules. Claude checks them every morning and writes one dry line per plant. You only hear about it, via Telegram, when something needs you.
 - **Control page.** Owner only. It shows everything above, plus devices and alerts.
@@ -30,7 +33,7 @@ The **Demo** panel on the control page lets you:
 
 - force a sea state (calm, poniente, levante, storm) or return to **live**
 - pin the sun to sunrise, noon, sunset or night
-- "ring the bell" as a guest
+- "ring the bell" as a guest (a name already on the wall, such as Lucía, arrives as a returning guest)
 - dry out a plant, or empty or refill a reservoir
 - fast-forward the plants a day or a week
 - run the Claude plant check on demand
@@ -128,7 +131,13 @@ Adding another brand means writing one small adapter object in `worker/src/light
 
 ### Guests: NFC tag and QR code
 
-- Write the guest page URL (`…/hola`) to an NFC sticker as a **URL record**, using an app such as *NFC Tools*. Print the same URL as a QR code for phones without NFC.
+- Write the guest page URL with `?door` on the end (`…/hola?door`) to an NFC sticker as a **URL record**, using an app such as *NFC Tools*. Print the same URL as a QR code for phones without NFC.
+  - When a phone that has been here before opens the `?door` link, the guest is checked in straight away, with no tapping. Without `?door`, they get a single "Entrar" button.
+- **Returning guests:**
+  - The guest's phone keeps a small key, so the wall recognises them.
+  - If the phone has forgotten them (Safari clears site data after about a week without a visit), typing the same first name asks "¿Has estado aquí antes?". Answering yes joins the visit to their existing star instead of creating a new one.
+  - Tapping in again within the same six-hour stay doesn't count as a new visit.
+- **Who's here:** **Control → Guests** shows each guest's number of visits and who is *here now*. **End visit** stops a star sparkling early (the star stays on the wall).
 - **iPhone vs Android and Wi-Fi over NFC:**
   - iPhones read URL tags fine, but **can't join Wi-Fi from an NFC tag**. iOS doesn't support Wi-Fi records on tags. That's why the tag opens the web page instead.
   - Android can join from a Wi-Fi NFC record, but support varies by manufacturer, so the page is used there too.
@@ -136,10 +145,12 @@ Adding another brand means writing one small adapter object in `worker/src/light
   - iPhones also offer "Share Password" automatically when a friend's iPhone is nearby.
 - Set the Wi-Fi details and the wall greeting under **Control → Guests**. The default greeting is *Bienvenido*. You can change it to something neutral, such as *Te damos la bienvenida*.
 - **Privacy:**
-  - Only a first name is stored. No email, no phone number, no IP address.
-  - Arrivals are rate-limited to 3 per 10 minutes per connection and 40 per day in total.
+  - Only a first name is stored, with a visit count and the time of the last arrival. No email, no phone number, no IP address.
+  - A guest's name is shown on the wall only while they're here, as the guest page tells them. The wall's data address is public, as the wall itself is, so anyone with the link could see who is here at that moment.
+  - Arrivals are rate-limited to 8 per 10 minutes per connection and 60 per day in total.
   - A hidden field catches bots.
-  - Guests can delete their own entry from the same page, and you can delete any entry from the control page.
+  - Guests can delete their own entry from the phone they first arrived on, and you can delete any entry from the control page.
+  - Being recognised by name alone never allows deleting a star, because typing a name is not proof of who someone is.
 
 ---
 
@@ -195,7 +206,7 @@ GitHub Pages (static)                Cloudflare Worker (TypeScript)           De
   /add       ESP Web Tools    ─────▶  /api/pairing  ◀── /api/pair ───────── plant node / panel
                                        cron */15: weather, simulator, auto light, offline alerts
                                        cron 07:30: Claude plant check → Telegram
-                                       D1: plants, readings, visitors, settings · KV: live state
+                                       D1: plants, readings, visitors, settings, arrivals · KV: caches, rate limits
 ```
 
 - **One renderer.** `web/lib/art.js` turns conditions into lines. That same code draws:

@@ -2,7 +2,7 @@
 import type { Env } from './env';
 import { getConditions, type Conditions } from './weather';
 import { json } from './http';
-import { deviceFromRequest } from './util';
+import { deviceFromRequest, getSetting, setSetting } from './util';
 // @ts-ignore — shared plain-JS modules, also served to the browser
 import { compose, toSVG } from '../../web/lib/art.js';
 // @ts-ignore
@@ -10,17 +10,25 @@ import { rasterize, encodePNG, packRaw } from '../../web/lib/raster.js';
 // @ts-ignore
 import { sunPosition } from '../../web/lib/sun.js';
 
-export interface Welcome { name: string; greeting?: string; until: number }
+/** The arrival moment every screen plays: whose star, which visit, how long since the last. */
+export interface Welcome { id: string; name: string; greeting: string; visits: number; since: number | null; at: number; until: number }
+/** One star per guest. Name only while they are here (they asked to be on the wall). */
+export interface Star { id: string; visits: number; here?: boolean; name?: string }
 export interface WallState {
   conditions: Conditions;
   sun: { altitude: number; azimuth: number };
   sunOverride: string | null;
   scene: string;
   dark: boolean;
-  visitors: { id: string }[];
+  visitors: Star[];
   welcome: Welcome | null;
   lat: number; lon: number;
 }
+
+/** A guest counts as here for this long after tapping in (or until the owner ends the visit). */
+export const PRESENT_MS = 6 * 3600000;
+export const isHere = (v: { last_seen: number | null; left_at: number | null }, t = Date.now()) =>
+  v.last_seen != null && v.last_seen > t - PRESENT_MS && !(v.left_at != null && v.left_at >= v.last_seen);
 
 const DARK_SCENES = new Set(['hosting', 'evening']);
 
@@ -36,17 +44,20 @@ export const SUN_PRESETS: Record<string, { altitude: number; azimuth: number }> 
 
 export async function wallState(env: Env, scenario?: string | null): Promise<WallState> {
   const lat = Number(env.LAT), lon = Number(env.LON);
-  const [demoScenario, sunOverride, scene, welcome, visitors] = await Promise.all([
+  const t = Date.now();
+  const [demoScenario, sunOverride, scene, welcome, rows] = await Promise.all([
     env.STATE.get('demo:scenario'),
     env.STATE.get('demo:sun'),
     env.STATE.get('scene'),
-    env.STATE.get<Welcome>('welcome', 'json'),
-    env.DB.prepare('SELECT id FROM visitors ORDER BY created_at').all<{ id: string }>()
+    getSetting<Welcome | null>(env, 'welcome', null),
+    env.DB.prepare('SELECT id, first_name, visits, last_seen, left_at FROM visitors ORDER BY created_at').all<any>()
       .then((r) => r.results).catch(() => []),
   ]);
+  const visitors: Star[] = rows.map((r: any) =>
+    isHere(r, t) ? { id: r.id, visits: r.visits, here: true, name: r.first_name } : { id: r.id, visits: r.visits });
   const conditions = await getConditions(env, scenario || demoScenario);
   const sun = (sunOverride && SUN_PRESETS[sunOverride]) || sunPosition(new Date(), lat, lon);
-  const active = welcome && welcome.until > Date.now() ? welcome : null;
+  const active = welcome && welcome.until > t ? welcome : null;
   const s = scene ?? 'auto';
   return {
     conditions, sun, sunOverride: sunOverride && SUN_PRESETS[sunOverride] ? sunOverride : null,
@@ -55,16 +66,19 @@ export async function wallState(env: Env, scenario?: string | null): Promise<Wal
   };
 }
 
-/** Any change that should redraw the panel bumps this. */
+// Revision and welcome live in D1, not KV: KV can take up to a minute to show a write in other
+// locations, and an arrival has to reach every screen within seconds.
+/** Any change that should redraw the screens bumps this. */
 export async function bumpWall(env: Env) {
-  await env.STATE.put('wall:rev', String(Date.now()));
+  await setSetting(env, 'wall:rev', Date.now());
 }
 
-/** Cheap version string; panels poll it and only download an image when it changes. */
+/** Cheap version string (one small query); screens poll it and only fetch more when it changes. */
 export async function wallVersion(env: Env): Promise<string> {
-  const [rev, w] = await Promise.all([env.STATE.get('wall:rev'), env.STATE.get<Welcome>('welcome', 'json')]);
-  const welcoming = w && w.until > Date.now() ? 'w' : '';
-  return `${rev ?? 0}.${Math.floor(Date.now() / 900000)}${welcoming}`;
+  const r = await env.DB.prepare("SELECT key, value FROM settings WHERE key IN ('wall:rev', 'welcome')").all<{ key: string; value: string }>();
+  const get = (k: string) => { const row = r.results.find((x) => x.key === k); return row ? JSON.parse(row.value) : null; };
+  const w: Welcome | null = get('welcome');
+  return `${get('wall:rev') ?? 0}.${Math.floor(Date.now() / 900000)}${w && w.until > Date.now() ? `w${w.at}` : ''}`;
 }
 
 function composeFor(state: WallState, width: number, height: number, overrides: { dark?: boolean } = {}, print = false) {
@@ -73,6 +87,7 @@ function composeFor(state: WallState, width: number, height: number, overrides: 
     dark: overrides.dark ?? state.dark,
     visitors: state.visitors,
     welcome: state.welcome,
+    hero: state.welcome?.id,
     time: Date.now() / 1000,
   });
 }

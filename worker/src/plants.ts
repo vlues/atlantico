@@ -165,9 +165,11 @@ export async function ensureSeeded(env: Env) {
     stmts.push(dev.bind('sim-panel', 'panel', 'Wall panel (simulated)', JSON.stringify({ size: '800x480', colors: 2 }), t, t));
     stmts.push(dev.bind('sim-lights', 'lights', 'Lights (simulated)', '{}', t, t));
     for (const p of DEFAULT_PLANTS) stmts.push(dev.bind(`sim-plant-${p.id}`, 'plant', `${p.name} node (simulated)`, JSON.stringify({ plantId: p.id }), t, t));
-    const v = env.DB.prepare('INSERT INTO visitors (id, first_name, delete_token, created_at) VALUES (?, ?, ?, ?)');
-    ['Lucía', 'Marco', 'Inés', 'Tom', 'Carmen', 'Pablo', 'Ana'].forEach((n, i) =>
-      stmts.push(v.bind(`demo-${i}-${n.toLowerCase()}`, n, 'demo', t - (40 - i * 5) * 86400000)));
+    const v = env.DB.prepare('INSERT INTO visitors (id, first_name, delete_token, created_at, visits, last_seen) VALUES (?, ?, ?, ?, ?, ?)');
+    ['Lucía', 'Marco', 'Inés', 'Tom', 'Carmen', 'Pablo', 'Ana'].forEach((n, i) => {
+      const first = t - (40 - i * 5) * 86400000;
+      stmts.push(v.bind(`demo-${i}-${n.toLowerCase()}`, n, 'demo', first, 1 + (n.length % 4), first + (i % 3) * 6 * 86400000));
+    });
   }
   await env.DB.batch(stmts);
   if (env.SIMULATE === 'true') {

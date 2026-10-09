@@ -1,9 +1,9 @@
 import type { Env } from './env';
 import { json, cors, preflight } from './http';
 import { requireOwner, body, setSetting, getSetting, now, logAlert } from './util';
-import { wallState, panelImage, panelPoll, liveSVG, liveHTML, bumpWall, SUN_PRESETS } from './wall';
+import { wallState, wallVersion, panelImage, panelPoll, liveSVG, liveHTML, bumpWall, SUN_PRESETS } from './wall';
 import { SCENARIOS } from './weather';
-import { arrive, welcome, deleteVisitor, listVisitors, guestInfo, cleanName, type WifiSettings } from './guests';
+import { arrive, demoArrive, deleteVisitor, endVisit, listVisitors, guestInfo, cleanName, type WifiSettings } from './guests';
 import { applyScene, saveGovee, SCENES, autoState } from './lights';
 import { plantStatus, listPlants, ensureSeeded, simulatorTick, fastForward, recordReading, type Rules } from './plants';
 import { createPairing, pairingStatus, pair, report, listDevices, updateDevice, removeDevice, offlineAlerts } from './devices';
@@ -50,6 +50,8 @@ on('GET', '/api/wall', async (_r, env, _c, _m, url) => {
   const s = await wallState(env, url.searchParams.get('scenario'));
   return json({ ...s, simulate: env.SIMULATE === 'true' });
 });
+on('GET', '/api/wall/version', async (_r, env) =>
+  new Response(await wallVersion(env), { headers: { 'content-type': 'text/plain', 'cache-control': 'no-store' } }));
 on('GET', '/art/live', (_r, env, _c, _m, url) => liveHTML(url, env));
 on('GET', '/art/live.svg', (_r, env, _c, _m, url) => liveSVG(url, env));
 on('GET', '/art/panel.png', (r, env, _c, _m, url) => panelImage(r, url, env, 'png'));
@@ -97,6 +99,7 @@ on('PATCH', '/api/devices/:id', (r, env, _c, m) => updateDevice(m[1], r, env), '
 on('DELETE', '/api/devices/:id', (_r, env, _c, m) => removeDevice(m[1], env), 'owner');
 on('GET', '/api/visitors', async (_r, env) => json(await listVisitors(env)), 'owner');
 on('DELETE', '/api/owner/visitors/:id', (r, env, _c, m) => deleteVisitor(m[1], r, env, true), 'owner');
+on('POST', '/api/owner/visitors/:id/leave', (_r, env, _c, m) => endVisit(m[1], env), 'owner');
 on('PUT', '/api/settings', async (r, env) => {
   const b = await body<{ wifi?: WifiSettings | null; greeting?: string }>(r);
   if (b.wifi !== undefined) {
@@ -195,7 +198,7 @@ async function demo(req: Request, env: Env, ctx: ExecutionContext): Promise<Resp
       return json({ ok: true });
     case 'arrive': {
       const name = cleanName(b.value) ?? 'Lucía';
-      return welcome(env, ctx, name);
+      return demoArrive(env, ctx, name);
     }
     case 'fastforward':
       await fastForward(env, Math.max(1, Math.min(240, Number(b.value) || 24)));

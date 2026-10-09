@@ -162,7 +162,8 @@ function renderDemo() {
 }
 $('d-sea').addEventListener('click', (e) => { const v = e.target.dataset.sea; if (v) act('/api/demo', { action: 'scenario', value: v }, `Sea: ${v}`); });
 $('d-sun').addEventListener('click', (e) => { const v = e.target.dataset.sun; if (v) act('/api/demo', { action: 'sun', value: v }, `Sun: ${v}`); });
-$('d-arrive').addEventListener('click', () => act('/api/demo', { action: 'arrive', value: $('d-name').value || 'Lucía' }, 'Welcome on the wall for 30 seconds · Hosting scene on'));
+$('d-arrive').addEventListener('click', () => act('/api/demo', { action: 'arrive', value: $('d-name').value || 'Lucía' },
+  (r) => `${r.returning ? `Welcome back, ${r.name} · visit ${r.visits}` : `Welcome, ${r.name} · new star`} · on every screen for 30 s · Hosting scene on`));
 document.querySelectorAll('[data-demo]').forEach((b) => b.addEventListener('click', () =>
   act('/api/demo', { action: b.dataset.demo, value: $('d-plant').value }, 'Done')));
 document.querySelectorAll('[data-ff]').forEach((b) => b.addEventListener('click', async () => {
@@ -211,10 +212,13 @@ function renderAlerts() {
 }
 
 function renderGuests() {
-  $('guestcount').textContent = `${data.visitors.length} on the wall`;
+  const here = data.visitors.filter((v) => v.here).length;
+  $('guestcount').textContent = `${data.visitors.length} on the wall${here ? ` · ${here} here now` : ''}`;
+  const date = (ms) => new Date(ms).toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' });
   $('visitors').innerHTML = data.visitors.map((v) => `<div>
-    <span class="grow serif" style="font-size:18px">${esc(v.first_name)}</span>
-    <span class="small muted">${new Date(v.created_at).toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' })}</span>
+    <span class="grow"><span class="serif" style="font-size:18px">${esc(v.first_name)}</span> ${v.here ? '<span class="tag warn">here now</span>' : ''}
+      <div class="small muted">${v.visits} visit${v.visits === 1 ? '' : 's'} · ${v.visits > 1 ? `last ${date(v.last_seen ?? v.created_at)} · first ${date(v.created_at)}` : date(v.created_at)}</div></span>
+    ${v.here ? `<button class="btn small quiet" data-leave="${v.id}">End visit</button>` : ''}
     <button class="btn small quiet" data-visitor="${v.id}">Remove</button></div>`).join('') || '<div class="muted small">No visitors yet.</div>';
   if (!formsFilled) {
     const f = $('wifi');
@@ -226,8 +230,9 @@ function renderGuests() {
   }
 }
 $('visitors').addEventListener('click', async (e) => {
-  const id = e.target.dataset.visitor;
+  const id = e.target.dataset.visitor, leave = e.target.dataset.leave;
   if (id) { await api(`/api/owner/visitors/${id}`, { method: 'DELETE', owner: true }).catch((err) => toast(err.message)); refresh(); }
+  if (leave) act(`/api/owner/visitors/${leave}/leave`, {}, 'Visit ended · their star rests');
 });
 $('wifi').addEventListener('submit', async (e) => {
   e.preventDefault();

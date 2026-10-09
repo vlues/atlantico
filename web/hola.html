@@ -13,28 +13,35 @@
   <style>
     html, body { min-height: 100%; }
     main { min-height: 100svh; display: grid; place-items: center; padding: 48px 16px; }
-    .card { width: min(420px, 100%); text-align: center; }
+    .card { width: min(420px, 100%); text-align: center; display: none; }
+    .card.show { display: block; }
     h1 { font-size: clamp(48px, 14vw, 72px); font-style: italic; letter-spacing: 0.01em; line-height: 1; }
     .sub { color: var(--muted); font-size: 12px; letter-spacing: .2em; text-transform: uppercase; margin: 18px 0 56px; }
     form { display: grid; gap: 28px; }
     input[type=text] { text-align: center; font: 300 24px var(--serif); padding: 12px 0; width: 100%; }
     .hp { position: absolute; left: -9999px; }
     .en { display: block; color: var(--muted); font-size: 11px; letter-spacing: .08em; margin-top: 6px; text-transform: none; }
-    #done { display: none; }
-    #done h2 { font-size: clamp(40px, 11vw, 56px); font-style: italic; }
+    #done h2, #confirm h2 { font-size: clamp(36px, 10vw, 52px); font-style: italic; line-height: 1.1; }
+    .line { font: italic 300 19px var(--serif); color: var(--fg); margin: 14px 0 0; }
+    .line .en { font: 300 11px var(--sans); }
+    .sky { margin: 36px -16px 0; position: relative; }
+    .sky canvas { display: block; width: 100%; aspect-ratio: 1 / .62; }
+    .sky figcaption { margin-top: 12px; }
     .wifi { margin: 48px auto 0; display: grid; gap: 18px; justify-items: center; }
     .qr { background: #f2f0eb; padding: 14px; width: 196px; height: 196px; }
     .qr img { display: block; }
     .how { color: var(--muted); font-size: 13px; line-height: 1.7; max-width: 340px; }
     .err { color: var(--warn); font-size: 13px; min-height: 1.4em; }
+    .choices { display: grid; gap: 12px; justify-items: center; margin-top: 36px; }
     footer { margin-top: 56px; }
   </style>
 </head>
 <body>
   <canvas class="drift"></canvas>
   <main>
-    <div class="card fade-in" id="ask">
-      <h1>Bienvenido</h1>
+    <!-- First time on this phone -->
+    <div class="card" id="ask">
+      <h1 id="greet">Bienvenido</h1>
       <p class="sub">Atlántico · Fuentebravía</p>
       <form id="f" autocomplete="off">
         <label class="field" for="name">Tu nombre<span class="en">Your first name</span></label>
@@ -43,12 +50,42 @@
         <div><button class="btn" type="submit">Entrar</button></div>
         <div class="err" id="err" role="status"></div>
       </form>
-      <p class="meta" style="margin-top:40px">Solo guardamos tu nombre de pila. Puedes borrarlo cuando quieras.<br>Only your first name is kept. You can delete it any time.</p>
+      <p class="meta" style="margin-top:40px">Solo guardamos tu nombre de pila. Mientras estás aquí aparece junto a tu estrella en la pared, y este teléfono te recordará la próxima vez. Puedes borrarlo cuando quieras.<br>
+        Only your first name is kept. While you're here it shows beside your star on the wall, and this phone will remember you next time. You can delete it any time.</p>
     </div>
 
+    <!-- This phone remembers them -->
+    <div class="card" id="back">
+      <p class="eyebrow">Hola de nuevo · Welcome back</p>
+      <h1 id="backname"></h1>
+      <form id="fb" style="margin-top:48px">
+        <div><button class="btn" type="submit">Entrar</button></div>
+        <div class="err" id="errb" role="status"></div>
+      </form>
+      <p style="margin-top:24px"><button class="btn quiet small" id="notme" type="button"></button></p>
+    </div>
+
+    <!-- Typed a name that already has a star -->
+    <div class="card" id="confirm">
+      <p class="eyebrow">Ya hay una estrella con este nombre</p>
+      <h2>¿Has estado aquí antes, <span id="cname"></span>?</h2>
+      <p class="meta">There's already a star with this name. Have you been here before?</p>
+      <div class="choices">
+        <button class="btn" id="yes" type="button">Sí, ya vine · Yes, it's me</button>
+        <button class="btn quiet" id="no" type="button">No, es mi primera vez · First time</button>
+      </div>
+      <div class="err" id="errc" role="status"></div>
+    </div>
+
+    <!-- In -->
     <div class="card" id="done">
       <p class="eyebrow">Mira la pared · Look at the wall</p>
       <h2 id="hello"></h2>
+      <p class="line" id="line"></p>
+      <figure class="sky" id="skyfig" hidden>
+        <canvas id="sky" aria-label="Your star in the sky of the wall piece"></canvas>
+        <figcaption class="eyebrow">Tu estrella · Your star</figcaption>
+      </figure>
       <div class="wifi" id="wifi" hidden>
         <p class="eyebrow" style="margin:0">Wi-Fi</p>
         <div class="qr" id="qr" aria-label="Código QR de la Wi-Fi"></div>
@@ -68,6 +105,7 @@
       </div>
       <footer>
         <button class="btn quiet small" id="forget" type="button">Borrar mi visita · Delete my visit</button>
+        <p class="meta" id="askhost" hidden>Para borrar tu estrella, pídeselo a tu anfitrión.<br>To remove your star, ask your host.</p>
       </footer>
     </div>
   </main>
@@ -76,23 +114,74 @@
   <script src="vendor/qrcode-generator-1.4.4.js"></script>
   <script type="module">
     import { api, drift } from './js/api.js';
+    import { compose, welcomeLine } from './lib/art.js';
+    import { sunPosition } from './lib/sun.js';
+    import { paint, arrival, revealAt } from './js/paint.js';
+
     drift(document.querySelector('.drift'), { lines: 10, alpha: 0.06 });
     const $ = (id) => document.getElementById(id);
     const KEY = 'atlantico-visit';
+    const params = new URLSearchParams(location.search);
     const saved = () => { try { return JSON.parse(localStorage.getItem(KEY) ?? 'null'); } catch { return null; } };
+    const remember = (v) => { try { localStorage.setItem(KEY, JSON.stringify(v)); } catch { /* private mode */ } };
+    const forget = () => { try { localStorage.removeItem(KEY); } catch { /* ignore */ } };
+    const card = (id) => { document.querySelectorAll('.card').forEach((c) => c.classList.toggle('show', c.id === id)); $(id).classList.add('fade-in'); };
 
-    api('/api/guest').then((g) => { if (g.greeting) document.querySelector('h1').textContent = g.greeting; }).catch(() => {});
+    api('/api/guest').then((g) => { if (g.greeting) $('greet').textContent = g.greeting; }).catch(() => {});
 
     const wifiString = (w) => {
       const e = (s) => String(s).replace(/([\\;,:"])/g, '\\$1');
       return `WIFI:T:${w.security};S:${e(w.ssid)};${w.security === 'nopass' ? '' : `P:${e(w.password)};`}${w.hidden ? 'H:true;' : ''};`;
     };
 
+    // ── Arriving ───────────────────────────────────────────────────────────────
+    let pending = null; // the name waiting on "have you been here before?"
+    async function checkIn(payload, errEl, btn) {
+      errEl.textContent = '';
+      if (btn) btn.disabled = true;
+      try {
+        const v = await api('/api/arrive', { method: 'POST', body: payload });
+        if (v.known) { pending = payload; $('cname').textContent = v.name; card('confirm'); return; }
+        if (!v.id) return; // honeypot
+        const had = saved();
+        remember({ id: v.id, token: v.deleteToken ?? (had?.id === v.id ? had.token : null), name: v.name, at: Date.now() });
+        show(v);
+      } catch (err) {
+        if (err.status === 404) { forget(); $('name').value = payload.name ?? ''; card('ask'); return; } // the star was removed
+        errEl.textContent = err.message;
+      } finally { if (btn) btn.disabled = false; }
+    }
+
+    $('f').addEventListener('submit', (e) => {
+      e.preventDefault();
+      checkIn({ name: $('name').value, website: e.target.website.value }, $('err'), e.submitter);
+    });
+    $('yes').addEventListener('click', (e) => checkIn({ ...pending, returning: true }, $('errc'), e.target));
+    $('no').addEventListener('click', (e) => checkIn({ ...pending, returning: false }, $('errc'), e.target));
+
+    // This phone remembers them: one tap (or none, straight from the door tag).
+    const prev = saved();
+    const fromSaved = () => prev.token ? { id: prev.id, token: prev.token, name: prev.name } : { name: prev.name, returning: true };
+    $('fb').addEventListener('submit', (e) => { e.preventDefault(); checkIn(fromSaved(), $('errb'), e.submitter); });
+    $('notme').addEventListener('click', () => { forget(); $('name').value = ''; card('ask'); $('name').focus(); });
+
+    if (prev && params.has('mine')) show({ name: prev.name, id: prev.id, deleteToken: prev.token, quiet: true });
+    else if (prev) {
+      $('backname').textContent = prev.name;
+      $('notme').textContent = `¿No eres ${prev.name}? · Not ${prev.name}?`;
+      card('back');
+      // Tapped the door tag: check in straight away (but not again on a reload).
+      if (params.has('door') && Date.now() - (prev.at ?? 0) > 3 * 60000) checkIn(fromSaved(), $('errb'));
+      if (params.has('door')) history.replaceState(null, '', location.pathname);
+    } else card('ask');
+
+    // ── In ─────────────────────────────────────────────────────────────────────
     function show(v) {
-      $('ask').style.display = 'none';
-      $('done').style.display = 'block';
-      $('done').classList.add('fade-in');
-      $('hello').textContent = `Hola, ${v.name}.`;
+      card('done');
+      $('hello').textContent = v.returning ? `Hola de nuevo, ${v.name}.` : `Hola, ${v.name}.`;
+      $('forget').hidden = !v.deleteToken;
+      $('askhost').hidden = !!v.deleteToken;
+      if (!v.quiet) sky(v);
       if (v.wifi) {
         $('wifi').hidden = false;
         $('ssid').textContent = v.wifi.ssid;
@@ -105,18 +194,36 @@
       }
     }
 
-    $('f').addEventListener('submit', async (e) => {
-      e.preventDefault();
-      $('err').textContent = '';
-      const btn = e.submitter; btn.disabled = true;
-      try {
-        const v = await api('/api/arrive', { method: 'POST', body: { name: $('name').value, website: e.target.website.value } });
-        if (v.id) { try { localStorage.setItem(KEY, JSON.stringify({ id: v.id, token: v.deleteToken, name: v.name })); } catch {} }
-        show(v);
-      } catch (err) {
-        $('err').textContent = err.message;
-      } finally { btn.disabled = false; }
-    });
+    // Their star, as it is on the wall right now, arriving the same way.
+    async function sky(v) {
+      let state = null;
+      try { state = await api('/api/wall'); } catch { /* draw without the others */ }
+      const c = state?.conditions ?? {};
+      $('line').innerHTML = '';
+      $('line').append(welcomeLine(v, c, 'es'), Object.assign(document.createElement('span'), { className: 'en', textContent: welcomeLine(v, c, 'en') }));
+      const visitors = state?.visitors?.some((s) => s.id === v.id) ? state.visitors : [...(state?.visitors ?? []), { id: v.id, visits: v.visits, here: true, name: v.name }];
+      const canvas = $('sky');
+      $('skyfig').hidden = false;
+      const ctx = canvas.getContext('2d');
+      const reduce = matchMedia('(prefers-reduced-motion: reduce)').matches;
+      const start = performance.now() - (reduce ? 8000 : 0);
+      const lat = state?.lat ?? 36.5986, lon = state?.lon ?? -6.2797;
+      const draw = (now) => {
+        const dpr = Math.min(2, devicePixelRatio || 1);
+        const w = Math.round(canvas.clientWidth * dpr), h = Math.round(w * 0.62);
+        if (canvas.width !== w) { canvas.width = w; canvas.height = h; }
+        const e = (now - start) / 1000;
+        // Composed taller than shown, so the sky gets most of the frame and the sea just shows.
+        const comp = compose({ ...c, sun: sunPosition(new Date(), lat, lon) }, {
+          width: w, height: Math.round(w * 1.15), dark: true, captions: false,
+          visitors, hero: v.id, reveal: revealAt(e), time: Date.now() / 1000, lat, lon,
+        });
+        paint(ctx, comp, 1, null);
+        arrival(ctx, comp, e);
+        if (e < 90 && !reduce) requestAnimationFrame(draw);
+      };
+      requestAnimationFrame(draw);
+    }
 
     $('showpw').addEventListener('click', () => { $('pw').hidden = !$('pw').hidden; });
     $('copypw').addEventListener('click', async (e) => {
@@ -125,14 +232,10 @@
     });
     $('forget').addEventListener('click', async () => {
       const v = saved();
-      if (v) await api(`/api/visitors/${v.id}`, { method: 'DELETE', body: { token: v.token } }).catch(() => {});
-      try { localStorage.removeItem(KEY); } catch {}
+      if (v?.token) await api(`/api/visitors/${v.id}`, { method: 'DELETE', body: { token: v.token } }).catch(() => {});
+      forget();
       $('done').innerHTML = '<p class="serif italic" style="font-size:28px">Borrado. Gracias.</p><p class="meta">Deleted. Thank you.</p>';
     });
-
-    // A returning guest sees their delete option straight away.
-    const prev = saved();
-    if (prev && new URLSearchParams(location.search).has('mine')) show({ name: prev.name });
   </script>
 </body>
 </html>

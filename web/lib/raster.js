@@ -12,7 +12,8 @@ export const SIX = [
 export function rasterize(comp, colors = 2) {
   const w = comp.width, h = comp.height;
   const cov = new Float32Array(w * h); // ink coverage 0..1
-  const tint = new Uint8Array(w * h);  // 0 ink, 1 sun accent, 2 visitor accent
+  const tint = new Uint8Array(w * h);  // 0 ink, 1 sun accent, 2 accent for guests who are here
+  const tintOf = (accent) => (accent === 'sun' ? 1 : accent === 'here' ? 2 : 0);
   const scale = Math.min(w, h) / 480;
   const baseW = Math.max(1.05, 0.95 * scale); // stroke width in px
 
@@ -97,11 +98,12 @@ export function rasterize(comp, colors = 2) {
       continue;
     }
     // Distant (faint) lines get thinner rather than grey: they break up like an engraving.
-    const lw = baseW * (0.55 + 0.45 * l.alpha);
-    for (let k = 2; k < p.length; k += 2) seg(p[k - 2], p[k - 1], p[k], p[k + 1], lw, 1, 0);
+    const lw = baseW * (0.55 + 0.45 * l.alpha) * (l.weight ?? 1);
+    const t = tintOf(l.accent);
+    for (let k = 2; k < p.length; k += 2) seg(p[k - 2], p[k - 1], p[k], p[k + 1], lw, 1, t);
   }
   for (const c of comp.circles) {
-    const t = c.accent === 'sun' ? 1 : c.accent === 'visitor' ? 2 : 0;
+    const t = tintOf(c.accent);
     if (c.fill) {
       const r = Math.max(1.2 * scale, c.r);
       const ring = [];
@@ -117,7 +119,7 @@ export function rasterize(comp, colors = 2) {
   for (const t of comp.texts) {
     // Small sizes use the heavier cut so hairlines survive the 1-bit threshold.
     const key = t.italic ? 'italic' : t.size < 16 * scale ? 'caption' : 'regular';
-    for (const glyph of textContours(t.text, t.x, t.y, t.size, t.align, key)) fill(glyph, 0);
+    for (const glyph of textContours(t.text, t.x, t.y, t.size, t.align, key)) fill(glyph, tintOf(t.accent));
   }
 
   // Reduce to inks.

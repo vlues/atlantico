@@ -199,7 +199,7 @@ async function main() {
   if (pagesUrl) {
     say(`  Wall             ${pagesUrl}/wall`);
     say(`  Control          ${pagesUrl}/control`);
-    say(`  Guest page       ${pagesUrl}/hola   ← put this URL on the NFC tag / QR code`);
+    say(`  Guest page       ${pagesUrl}/hola?door   ← put this URL on the NFC tag / QR code`);
     say(`  Add device       ${pagesUrl}/add`);
     say('\n  GitHub Pages takes ~3 minutes to build the site and firmware the first time.');
   }

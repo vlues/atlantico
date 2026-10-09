@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { compose, hashString, windName } from '../web/lib/art.js';
+import { compose, hashString, windName, welcomeLine } from '../web/lib/art.js';
 import { rasterize, encodePNG, packRaw } from '../web/lib/raster.js';
 import { sunPosition, sunTimes } from '../web/lib/sun.js';
 
@@ -66,4 +66,54 @@ test('local wind names', () => {
   assert.equal(windName(25, 280), 'poniente');
   assert.equal(windName(3, 90), 'calma');
   assert.ok(hashString('a') !== hashString('b'));
+});
+
+const night = { ...calm, sun: { altitude: -20, azimuth: 300 } };
+
+test('guests who are here sparkle and carry their name; the rest stay quiet dots', () => {
+  const comp = compose(night, { width: 800, height: 480, visitors: [{ id: 'ana', visits: 2, here: true, name: 'Ana' }, { id: 'tom', visits: 1 }] });
+  assert.ok(comp.lines.filter((l) => l.accent === 'here').length >= 8, 'four-point sparkle');
+  assert.deepEqual(comp.texts.filter((t) => t.accent === 'here').map((t) => t.text), ['Ana']);
+  assert.equal(comp.circles.filter((c) => c.accent === 'visitor').length, 1);
+  assert.ok(!comp.lines.some((l) => l.dotted && l.accent), 'no constellation lines into a guest who is here');
+});
+
+test('the welcomed star appears with its entrance and reflects on the water', () => {
+  const visitors = [{ id: 'lu', visits: 3, here: true, name: 'Lucía' }];
+  const welcome = { id: 'lu', name: 'Lucía', greeting: 'Hola de nuevo', visits: 3, since: 12 * 86400000 };
+  const before = compose(night, { width: 800, height: 480, visitors, welcome, hero: 'lu', reveal: 0 });
+  assert.ok(before.hero, 'screens know where it will land');
+  assert.ok(!before.lines.some((l) => l.accent === 'here'), 'not drawn before it arrives');
+  const after = compose(night, { width: 800, height: 480, visitors, welcome, hero: 'lu', reveal: 1, print: true });
+  const glints = after.lines.filter((l) => l.accent === 'here' && l.pts[1] > after.horizon);
+  assert.ok(glints.length > 10 && glints.every((l) => Math.abs(l.pts[0] - after.hero.x) < 40), 'a column of glints below the star');
+  assert.deepEqual(after.texts.filter((t) => t.role).map((t) => t.text), ['Hola de nuevo', 'Lucía', 'tercera visita · la anterior, hace 12 días']);
+});
+
+test('the welcome words step aside rather than cover the guest\'s own star', () => {
+  let id = null;
+  for (let i = 0; i < 4000 && !id; i++) {
+    const c = compose(night, { width: 800, height: 480, visitors: [{ id: `g${i}`, here: true }], hero: `g${i}` });
+    if (c.hero && Math.abs(c.hero.x - 400) < 40 && c.hero.y > 90 && c.hero.y < 140) id = `g${i}`;
+  }
+  assert.ok(id, 'found a star under the middle of the sky');
+  const comp = compose(night, { width: 800, height: 480, visitors: [{ id, here: true }], hero: id, welcome: { id, name: 'Maximiliano', visits: 1 } });
+  const name = comp.texts.find((t) => t.role === 'name');
+  assert.ok(Math.abs(name.x - comp.hero.x) > 120, `name at ${name.x}, star at ${comp.hero.x}`);
+});
+
+test('the personal line, in both languages', () => {
+  const levante = { windSpeed: 40, windDirection: 90 };
+  assert.equal(welcomeLine({ visits: 1 }, levante), 'tu estrella, desde hoy · llegas con levante');
+  assert.equal(welcomeLine({ visits: 1 }, levante, 'en'), 'your star, from today · arriving with the levante');
+  assert.equal(welcomeLine({ visits: 2, since: 30 * 3600000 }, levante), 'segunda visita · la anterior, ayer');
+  assert.equal(welcomeLine({ visits: 14, since: 400 * 86400000 }, {}, 'en'), 'visit 14 · the last one 13 months ago');
+});
+
+test('on a six-colour panel only guests who are here get the accent ink', () => {
+  const v = [{ id: 'a', here: true, name: 'A' }, { id: 'b' }];
+  assert.ok(new Set(rasterize(compose(night, { width: 400, height: 240, print: true, dark: true, visitors: v }), 6).px).has(2), 'yellow on a dark wall');
+  assert.ok(new Set(rasterize(compose(night, { width: 400, height: 240, print: true, visitors: v }), 6).px).has(4), 'blue on a light wall');
+  const quiet = new Set(rasterize(compose(night, { width: 400, height: 240, print: true, visitors: [{ id: 'b' }] }), 6).px);
+  assert.ok(!quiet.has(2) && !quiet.has(4));
 });
