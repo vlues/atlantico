@@ -76,11 +76,13 @@ function compFor(s, v, now) {
   });
 }
 
-// About 30 frames a second; slower computers (a Raspberry Pi behind a TV) drop to 15 by themselves.
+// About 30 frames a second, evenly spaced (every other refresh of a 60 Hz screen, every fourth at
+// 120 Hz); slower computers (a Raspberry Pi behind a TV) drop to an even 15 by themselves.
 let last = 0, cost = 0;
 function frame(now) {
   requestAnimationFrame(frame);
-  if (!state || now - last < (cost > 24 ? 66 : 33)) return;
+  const every = cost > 24 ? 1000 / 15 : 1000 / 30;
+  if (!state || now - last < every - 6) return; // 6 ms slack: always the same number of refreshes apart
   last = now;
   const began = performance.now();
   draw();

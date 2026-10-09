@@ -333,20 +333,11 @@ export function compose(c, o = {}) {
     }
   }
 
-  // Where the water is: the y of the sea line at depth `s` (0 horizon … 1 near) under x.
+  // Where the water is: the sea surface at depth `sd` (0 horizon … 1 near) under x. Continuous in both,
+  // so anything floating on it rides the swell smoothly instead of stepping from line to line.
   const waterY = (sd, x) => {
-    let best = null, bd = Infinity;
-    for (const l of rows) {
-      const d = Math.abs(l.row - sd), p = l.pts;
-      if (d > bd || x < p[0] || x > p[p.length - 2]) continue;
-      bd = d; best = l;
-    }
-    if (!best) return horizon + fh * persp(sd);
-    const p = best.pts;
-    let q = 0;
-    while (q + 2 < p.length && p[q + 2] < x) q += 2;
-    const f = clamp((x - p[q]) / Math.max(1e-6, (p[q + 2] ?? p[q]) - p[q]), 0, 1);
-    return p[q + 1] + ((p[q + 3] ?? p[q + 1]) - p[q + 1]) * f;
+    const u = clamp((x - mx) / fw, 0, 1), [d] = surface(u, sd);
+    return style === 'relieve' ? ridge(u, sd, d) : Math.min(H * 0.89, horizon + fh * persp(sd + d / (N - 1)));
   };
 
   // ── Weather, live, drawn like an engraving's sky ──────────────────────────────
@@ -501,7 +492,9 @@ export function compose(c, o = {}) {
     if (!live) return { ...b, fwd: hash(h, 9, 3) < 0.5 ? 1 : -1, speed: 0 };
     const [u1, u2, dv] = wander(h, 8, 150 + 150 * hash(h, 10, 5));
     const amp = fw * 0.07 * (0.6 + 0.8 * hash(h, 11, 5));
-    return { x: clamp(b.x + amp * u1, mx + S * 0.03, W - mx - S * 0.03), sd: clamp(b.sd + 0.035 * u2, 0.03, 0.45), fwd: dv >= 0 ? 1 : -1, speed: Math.abs(dv) };
+    // fwd eases through zero as the boat comes about (seen bow-on for a moment), rather than flipping.
+    const fwd = Math.sign(dv || 1) * Math.max(0.14, Math.min(1, Math.abs(dv) * 3));
+    return { x: clamp(b.x + amp * u1, mx + S * 0.03, W - mx - S * 0.03), sd: clamp(b.sd + 0.035 * u2, 0.03, 0.45), fwd, speed: Math.abs(dv) };
   };
 
   const stars = [], boats = [];
@@ -529,7 +522,7 @@ export function compose(c, o = {}) {
           P = v.gone ? { x: P.x, y: P.y + S * 0.05 * k } : { x: P.x + (home.x - P.x) * k, y: P.y + (home.y - P.y) * k };
         }
         if (hero && !byDay) heroAt.push({ id: v.id, x: P.x, y: P.y, home, kind: 'star' });
-        if (!(hero && (hz.reveal ?? 1) < 0.02)) stars.push({ x: P.x, y: P.y, h, v: { ...v, name }, hero, reveal: hz?.reveal ?? 1, here, dep: dep ? dep.p : null, gone: !!v.gone });
+        if (!(hero && (hz.reveal ?? 1) < 0.02)) stars.push({ x: P.x, y: P.y, hx: home.x, hy: home.y, h, v: { ...v, name }, hero, reveal: hz?.reveal ?? 1, here, dep: dep ? dep.p : null, gone: !!v.gone });
       }
     }
     if (sailsA > 0 && (here || dep)) {
@@ -551,7 +544,8 @@ export function compose(c, o = {}) {
       }
       const wy = waterY(sd, x), size = S * (0.034 + 0.07 * sd) * (hero ? 1.25 : 1);
       if (hero && byDay) heroAt.push({ id: v.id, x, y: wy - size * 0.55, kind: 'sail', water: wy, size });
-      boats.push({ x, wy, sd, size, h, v: { ...v, name }, hero, hoist, sink, fwd, speed, leaving: !!dep, fade: dep ? 1 - clamp((dep.p - 0.9) / 0.1, 0, 1) : 1, labelFade: dep ? 1 - ease(dep.p * 2) : 1 });
+      const hb = boatHome(h);
+      boats.push({ x, wy, sd, size, h, v: { ...v, name }, hero, hoist, sink, fwd, speed, leaving: !!dep, hx: hb.x, hy: waterY(hb.sd, hb.x) - size * 0.55, fade: dep ? 1 - clamp((dep.p - 0.9) / 0.1, 0, 1) : 1, labelFade: dep ? 1 - ease(dep.p * 2) : 1 });
     }
   }
 
@@ -663,10 +657,11 @@ export function compose(c, o = {}) {
       if (seg.length >= 4) marks.push({ pts: seg, alpha, weight, accent });
     };
     const boom = -0.13 * z, head = boom - 0.88 * z * b.hoist;
-    if (live && b.speed > 0.25 && !b.sink) {
-      // Wake: two lines opening out behind the stern.
+    const wakeA = clamp((b.speed - 0.15) / 0.35, 0, 1) * 0.4 * A;
+    if (live && wakeA > 0.01 && !b.sink) {
+      // Wake: two lines opening out behind the stern, fading in and out with speed.
       const Lw = z * (0.6 + 1.8 * b.speed), sx = X - f * 0.5 * z;
-      for (const side of [-1, 1]) mark([sx, Y + z * 0.02, sx - f * Lw, Y + z * 0.02 + side * Lw * 0.14], 0.4 * b.speed * A, 0.7, null);
+      for (const side of [-1, 1]) mark([sx, Y + z * 0.02, sx - f * Lw, Y + z * 0.02 + side * Lw * 0.14], wakeA, 0.7, null);
     }
     shape([...P(-0.56 * z * f, -0.13 * z), ...P(0.6 * z * f, -0.13 * z), ...P(0.44 * z * f, 0.02 * z), ...P(-0.46 * z * f, 0.02 * z)], 'bg', A);
     if (b.hoist > 0.03) {
@@ -687,7 +682,7 @@ export function compose(c, o = {}) {
       mark([X - 0.36 * z, Y + 0.12 * z, X + 0.3 * z, Y + 0.12 * z], 0.5 * A, 0.8);
       mark([X - 0.2 * z, Y + 0.24 * z, X + 0.14 * z, Y + 0.24 * z], 0.3 * A, 0.8);
     }
-    if (b.v.name && !o.welcome && byDay && b.hoist > 0.9 && b.labelFade > 0.02) labels.push({ x: X, y: Y - z * 0.55, h: b.h, v: b.v, r0: z * 0.72 + cap * 0.3, sail: true, fade: b.labelFade });
+    if (b.v.name && !o.welcome && byDay && b.hoist > 0.9 && b.labelFade > 0.02) labels.push({ x: X, y: Y - z * 0.55, hx: b.hx, hy: b.hy, h: b.h, v: b.v, r0: z * 0.72 + cap * 0.3, sail: true, fade: b.labelFade });
   }
 
   // Gulls by day, a few, gliding across with the wind (none in rain or under a grey sky).
@@ -713,8 +708,10 @@ export function compose(c, o = {}) {
   if (o.captions !== false) placed.push({ x0: 0, x1: W, y0: 0, y1: H * 0.075 + cap * (W < H * 1.3 ? 2.6 : 0.8) }); // the title and edition
   if (sunMark) placed.push(box(sunMark.x, sunMark.y, sunMark.r * 1.6));
   if (moonMark) placed.push(box(moonMark.x, moonMark.y, moonMark.r * 1.5));
-  if (!byDay) for (const d of dots) placed.push(box(d.x, d.y, S * (d.hero ? 0.05 : d.here ? 0.026 : 0.007), d));
-  for (const d of labels) if (d.sail) placed.push(box(d.x, d.y, d.r0 * 0.75, d));
+  // Placement is decided where each guest belongs (so names don't hop as everyone drifts) and drawn
+  // where they are now.
+  if (!byDay) for (const d of dots) placed.push(box(d.hx ?? d.x, d.hy ?? d.y, S * (d.hero ? 0.05 : d.here ? 0.026 : 0.007), d));
+  for (const d of labels) if (d.sail) placed.push(box(d.hx ?? d.x, d.hy ?? d.y, d.r0 * 0.75, d));
   const arcBox = (x, y, r, a, span, size) => {
     let x0 = Infinity, x1 = -Infinity, y0 = Infinity, y1 = -Infinity;
     for (let k = 0; k <= 6; k++) {
@@ -737,11 +734,11 @@ export function compose(c, o = {}) {
     for (const ring of [1, 1.6]) {
       r0 = (d.r0 ?? S * (0.03 + 0.008 * u(1))) * ring;
       span = Math.min(Math.PI * 1.2, w / r0);
-      a0 = angles.map((da) => start + da).find((a) => { const b = arcBox(d.x, d.y, r0, a, span, size); return b.x0 > mx * 0.5 && b.x1 < W - mx * 0.5 && !hit(b); });
+      a0 = angles.map((da) => start + da).find((a) => { const b = arcBox(d.hx ?? d.x, d.hy ?? d.y, r0, a, span, size); return b.x0 > mx * 0.5 && b.x1 < W - mx * 0.5 && !hit(b); });
       if (a0 !== undefined) break;
     }
     if (a0 === undefined) continue;
-    placed.push(arcBox(d.x, d.y, r0, a0, span, size));
+    placed.push(arcBox(d.hx ?? d.x, d.hy ?? d.y, r0, a0, span, size));
     const sway = o.print ? 0 : (d.sail ? 0.12 : 0.3) * Math.sin(t * (0.05 + 0.07 * u(3)) * (u(4) < 0.5 ? -1 : 1) + u(5) * TAU);
     const a = a0 + sway;
     texts.push({ text: d.v.name, arc: { x: d.x, y: d.y, r: r0, a }, size, italic: true, alpha: 0.95 * (d.fade ?? 1), accent: 'here', role: 'label' });
