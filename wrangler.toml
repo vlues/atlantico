@@ -1,0 +1,29 @@
+# Atlántico Worker. `npm run setup` fills in the real IDs; the placeholders work for local sim.
+name = "atlantico"
+main = "worker/src/index.ts"
+compatibility_date = "2026-09-01"
+workers_dev = true
+
+[vars]
+SIMULATE = "true"
+LAT = "36.5986"
+LON = "-6.2797"
+PANEL_SIZES = "800x480,1600x1200,1304x984,640x384"
+PAGES_ORIGIN = "https://vlues.github.io"
+
+[[kv_namespaces]]
+binding = "STATE"
+id = "01966174a7164f49923f35bdff06f3a5"
+
+[[d1_databases]]
+binding = "DB"
+database_name = "atlantico"
+database_id = "36e7427f-2a1d-430a-9c9f-aa9371b191d9"
+migrations_dir = "worker/migrations"
+
+[triggers]
+# every 15 min: weather cache, simulator tick, device health. 07:30 UTC: daily plant check.
+crons = ["*/15 * * * *", "30 7 * * *"]
+
+[observability]
+enabled = true

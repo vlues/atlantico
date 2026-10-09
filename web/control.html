@@ -1,0 +1,147 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="theme-color" content="#0a0a0b">
+  <meta name="robots" content="noindex">
+  <title>Atlántico · Control</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:ital,wght@0,300;0,400;1,300&family=Inter:wght@200;300;400&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="css/base.css">
+  <style>
+    #login { min-height: 100svh; display: grid; place-items: center; padding: 16px; }
+    #login form { display: grid; gap: 28px; width: min(320px, 100%); text-align: center; }
+    #login h1 { font-size: 44px; }
+    #login input { text-align: center; width: 100%; font-size: 18px; letter-spacing: .2em; }
+    #app { display: none; }
+    .preview { position: relative; aspect-ratio: 16 / 10; border: 1px solid var(--line); overflow: hidden; background: #000; }
+    .preview iframe, .preview img { position: absolute; inset: 0; width: 100%; height: 100%; border: 0; object-fit: contain; background: #f2f0eb; }
+    .preview img { image-rendering: pixelated; }
+    .scenes { display: grid; grid-template-columns: repeat(auto-fit, minmax(110px, 1fr)); gap: 8px; }
+    .plant h3 { font-size: 26px; }
+    .plant .species { color: var(--muted); font-size: 12px; margin: 2px 0 18px; }
+    .spark { width: 100%; height: 56px; display: block; margin: 14px 0 6px; }
+    .kv { display: grid; grid-template-columns: repeat(3, 1fr); gap: 12px; margin: 14px 0; }
+    .kv div { display: grid; gap: 2px; }
+    .kv b { font: 300 20px var(--serif); }
+    .kv span { font-size: 10px; letter-spacing: .14em; text-transform: uppercase; color: var(--muted); }
+    .note { font: italic 300 18px/1.35 var(--serif); margin: 12px 0 16px; min-height: 1.35em; }
+    .rules { display: grid; grid-template-columns: repeat(auto-fit, minmax(120px, 1fr)); gap: 14px; margin-top: 14px; }
+    .list { border-top: 1px solid var(--line); }
+    .list > div { display: flex; align-items: center; gap: 14px; padding: 14px 0; border-bottom: 1px solid var(--line); flex-wrap: wrap; }
+    .list .grow { flex: 1; min-width: 160px; }
+    .alert-time { color: var(--muted); font-size: 12px; width: 92px; flex: none; }
+    .demo { border: 1px dashed rgba(233,230,223,.18); padding: 22px; }
+    .demo .row { margin: 0 0 16px; }
+    .demo .label { width: 120px; color: var(--muted); font-size: 11px; letter-spacing: .14em; text-transform: uppercase; }
+    .chips { display: flex; flex-wrap: wrap; gap: 6px; }
+    .source { font-size: 12px; color: var(--muted); }
+    @media (max-width: 560px) { .demo .label { width: 100%; } .alert-time { width: auto; } }
+  </style>
+</head>
+<body>
+  <div id="login">
+    <form class="fade-in">
+      <h1>Atlántico</h1>
+      <p class="eyebrow" style="margin:0">Owner</p>
+      <input type="password" id="pass" autocomplete="current-password" placeholder="passcode" required>
+      <div><button class="btn" type="submit">Open</button></div>
+      <div class="small" id="loginerr" style="color:var(--warn);min-height:1.4em"></div>
+    </form>
+  </div>
+
+  <div id="app" class="page">
+    <header class="masthead">
+      <h1>Atlántico</h1>
+      <div class="row">
+        <a class="btn quiet small" href="wall" target="_blank" rel="noopener">Wall ↗</a>
+        <a class="btn quiet small" href="hola" target="_blank" rel="noopener">Guest page ↗</a>
+        <a class="btn quiet small" href="add">Add device</a>
+        <button class="btn quiet small" id="logout">Lock</button>
+      </div>
+    </header>
+
+    <section>
+      <div class="row spread" style="margin-bottom:14px">
+        <p class="eyebrow" style="margin:0">Wall piece</p>
+        <div class="chips">
+          <button class="btn small on" data-view="web">Browser</button>
+          <button class="btn small" data-view="ink">E-ink</button>
+          <button class="btn small" data-view="ink6">E-ink colour</button>
+        </div>
+      </div>
+      <div class="preview" id="preview"><iframe src="wall" title="Wall piece"></iframe></div>
+      <p class="source" id="source" style="margin-top:12px"></p>
+    </section>
+
+    <section>
+      <h2>Light <small id="lightstate"></small></h2>
+      <div class="scenes" id="scenes"></div>
+    </section>
+
+    <section>
+      <h2>Plants <small id="checkline"></small></h2>
+      <div class="grid two" id="plants"></div>
+    </section>
+
+    <section class="demo" id="demo">
+      <h2 style="margin-bottom:6px">Demo <small>try everything without hardware</small></h2>
+      <p class="small muted" style="margin:0 0 22px" id="demonote"></p>
+      <div class="row"><span class="label">Sea</span><div class="chips" id="d-sea"></div></div>
+      <div class="row"><span class="label">Time of day</span><div class="chips" id="d-sun"></div></div>
+      <div class="row"><span class="label">Guest arrives</span>
+        <input type="text" id="d-name" placeholder="Lucía" maxlength="24" style="width:140px">
+        <button class="btn small" id="d-arrive">Ring the bell</button></div>
+      <div class="row"><span class="label">Plants</span>
+        <select id="d-plant"></select>
+        <button class="btn small" data-demo="dry">Dry out</button>
+        <button class="btn small" data-demo="empty">Empty reservoir</button>
+        <button class="btn small" data-demo="refill">Refill</button></div>
+      <div class="row"><span class="label">Time</span>
+        <button class="btn small" data-ff="24">+1 day</button>
+        <button class="btn small" data-ff="168">+1 week</button>
+        <button class="btn small" id="d-check">Run plant check now</button></div>
+      <div class="row"><span class="label">Visitors</span>
+        <button class="btn small" id="d-clear">Remove demo visitors</button></div>
+    </section>
+
+    <section>
+      <h2>Devices <small id="devsummary"></small></h2>
+      <div class="list" id="devices"></div>
+      <div class="row" style="margin-top:18px"><a class="btn" href="add">Add device</a></div>
+    </section>
+
+    <section>
+      <h2>Alerts</h2>
+      <div class="list" id="alerts"></div>
+    </section>
+
+    <section>
+      <h2>Guests <small id="guestcount"></small></h2>
+      <div class="grid two">
+        <div class="cell">
+          <p class="eyebrow">Wi-Fi shown to guests</p>
+          <form id="wifi" class="rules" style="grid-template-columns:1fr">
+            <label class="field">Network name<input type="text" name="ssid" maxlength="32"></label>
+            <label class="field">Password<input type="password" name="password" maxlength="63" placeholder="unchanged"></label>
+            <label class="field">Security<select name="security"><option>WPA</option><option>WEP</option><option value="nopass">Open</option></select></label>
+            <label class="field">Greeting on the wall<input type="text" name="greeting" maxlength="30"></label>
+            <div><button class="btn small" type="submit">Save</button></div>
+          </form>
+        </div>
+        <div class="cell"><p class="eyebrow">Visitors</p><div class="list" id="visitors" style="max-height:340px;overflow:auto"></div></div>
+      </div>
+    </section>
+
+    <section>
+      <h2>Connections</h2>
+      <div class="list" id="connections"></div>
+    </section>
+  </div>
+
+  <script src="config.js"></script>
+  <script type="module" src="js/control.js"></script>
+</body>
+</html>

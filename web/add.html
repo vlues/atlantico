@@ -1,0 +1,110 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="theme-color" content="#0a0a0b">
+  <meta name="robots" content="noindex">
+  <title>Atlántico · Add device</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:ital,wght@0,300;0,400;1,300&family=Inter:wght@200;300;400&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="css/base.css">
+  <script type="module" src="https://unpkg.com/esp-web-tools@10.4.0/dist/web/install-button.js?module"></script>
+  <style>
+    .page { max-width: 720px; }
+    .types { display: grid; gap: 1px; background: var(--line); border: 1px solid var(--line); }
+    @media (min-width: 640px) { .types { grid-template-columns: repeat(3, 1fr); } }
+    .types button { background: var(--bg); border: 0; color: var(--fg); padding: 26px 20px; text-align: left; cursor: pointer; transition: background .5s var(--ease); }
+    .types button:hover { background: var(--bg-raised); }
+    .types button.on { background: var(--fg); color: var(--bg); }
+    .types button.on small { color: #555; }
+    .types h3 { font-size: 24px; margin-bottom: 6px; }
+    .types small { color: var(--muted); font-size: 12px; line-height: 1.5; display: block; }
+    .step { display: grid; grid-template-columns: 40px 1fr; gap: 8px 12px; margin: 36px 0 0; opacity: .35; transition: opacity .6s var(--ease); }
+    .step.live { opacity: 1; }
+    .step .n { font: italic 300 30px/1 var(--serif); color: var(--muted); }
+    .step h3 { font-size: 22px; }
+    .step p { margin: 4px 0 14px; color: var(--muted); font-size: 14px; }
+    .opts { display: grid; gap: 18px; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); margin: 14px 0 6px; }
+    .code { font: 300 34px var(--serif); letter-spacing: .28em; }
+    esp-web-install-button button[slot=activate] { font: inherit; }
+    .warnbox { border: 1px solid rgba(201,164,106,.35); color: var(--warn); padding: 12px 14px; font-size: 13px; margin: 12px 0; }
+    .bulbs label { display: flex; gap: 10px; align-items: center; padding: 10px 0; border-bottom: 1px solid var(--line); }
+    #log { font: 12px/1.5 ui-monospace, Menlo, monospace; color: var(--muted); white-space: pre-wrap; max-height: 140px; overflow: auto; margin-top: 10px; }
+  </style>
+</head>
+<body>
+  <div class="page">
+    <header class="masthead">
+      <h1>Add a device</h1>
+      <a class="btn quiet small" href="control">← Control</a>
+    </header>
+
+    <p class="eyebrow">1 · What are you adding?</p>
+    <div class="types" id="types">
+      <button data-type="panel"><h3>Wall panel</h3><small>E-ink frame showing Atlántico. ESP32 + e-paper.</small></button>
+      <button data-type="plant"><h3>Plant node</h3><small>Soil moisture, temperature, reservoir and a small pump.</small></button>
+      <button data-type="lights"><h3>Lights</h3><small>Govee bulbs. Paste an API key, pick bulbs. No flashing.</small></button>
+    </div>
+
+    <div id="esp" hidden>
+      <div class="step live" id="s-opts">
+        <span class="n">2</span>
+        <div>
+          <h3>Options</h3>
+          <div class="opts" id="opts"></div>
+        </div>
+      </div>
+      <div class="step" id="s-install">
+        <span class="n">3</span>
+        <div>
+          <h3>Plug in and install</h3>
+          <p>Connect the board to this Mac with a USB-C data cable, then press Install. Chrome or Edge on a computer only.
+            After flashing, the same window asks for your Wi-Fi.</p>
+          <div id="nobrowser" class="warnbox" hidden>This browser can't talk to USB devices. Open this page in Chrome or Edge on your Mac.</div>
+          <div id="nofw" class="warnbox" hidden></div>
+          <esp-web-install-button id="install">
+            <button slot="activate" class="btn">Install</button>
+            <span slot="unsupported"></span>
+            <span slot="not-allowed">Needs HTTPS (or localhost).</span>
+          </esp-web-install-button>
+        </div>
+      </div>
+      <div class="step" id="s-pair">
+        <span class="n">4</span>
+        <div>
+          <h3>Pair</h3>
+          <p>Once Wi-Fi is connected, close the install window and press Pair. The board stays plugged in. This sends a one-time code over USB and the device gets its own token.</p>
+          <div class="row"><span class="code" id="code">······</span><span class="small muted" id="codeexp"></span></div>
+          <div class="row" style="margin-top:14px"><button class="btn" id="pairbtn">Pair</button><span class="small muted" id="pairstate"></span></div>
+          <div id="log"></div>
+        </div>
+      </div>
+    </div>
+
+    <div id="lights" hidden>
+      <div class="step live">
+        <span class="n">2</span>
+        <div>
+          <h3>Govee API key</h3>
+          <p>In the Govee Home app: Profile › Settings › Apply for API Key. It arrives by email within minutes.</p>
+          <div class="row"><input type="password" id="gkey" placeholder="paste key" style="flex:1;min-width:220px"><button class="btn" id="glist">Find bulbs</button></div>
+        </div>
+      </div>
+      <div class="step" id="s-bulbs">
+        <span class="n">3</span>
+        <div>
+          <h3>Pick bulbs</h3>
+          <div class="bulbs" id="bulbs"></div>
+          <div class="row" style="margin-top:16px"><button class="btn" id="gsave" disabled>Use these bulbs</button>
+            <button class="btn quiet small" id="gremove">Disconnect Govee</button></div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <script src="config.js"></script>
+  <script type="module" src="js/add.js"></script>
+</body>
+</html>

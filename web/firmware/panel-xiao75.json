@@ -1,0 +1,9 @@
+{
+  "name": "Atlántico wall panel (XIAO 7.5)",
+  "version": "1.0.0",
+  "new_install_prompt_erase": true,
+  "new_install_improv_wait_time": 15,
+  "builds": [
+    { "chipFamily": "ESP32-C3", "parts": [{ "path": "panel-xiao75.bin", "offset": 0 }] }
+  ]
+}

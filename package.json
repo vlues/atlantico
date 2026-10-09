@@ -1,0 +1,26 @@
+{
+  "name": "atlantico",
+  "private": true,
+  "type": "module",
+  "description": "A quiet smart-apartment system for a flat in Fuentebravía.",
+  "engines": {
+    "node": ">=20"
+  },
+  "scripts": {
+    "sim": "node scripts/sim.mjs",
+    "demo": "node scripts/sim.mjs",
+    "setup": "node scripts/setup.mjs",
+    "deploy": "node scripts/deploy.mjs",
+    "check": "tsc --noEmit -p .",
+    "test": "node --test test/*.test.mjs"
+  },
+  "devDependencies": {
+    "@cloudflare/workers-types": "5.20261008.1",
+    "opentype.js": "2.0.0",
+    "typescript": "5.9.3",
+    "wrangler": "4.149.0"
+  },
+  "dependencies": {
+    "@anthropic-ai/sdk": "0.132.1"
+  }
+}

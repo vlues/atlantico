@@ -1,0 +1,6 @@
+{
+  "version": "0.0.1",
+  "configurations": [
+    { "name": "atlantico-sim", "runtimeExecutable": "npm", "runtimeArgs": ["run", "sim"], "port": 8788 }
+  ]
+}

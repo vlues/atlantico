@@ -1,0 +1,9 @@
+node_modules/
+.wrangler/
+.dev.vars
+.atlantico.local.json
+.DS_Store
+firmware/**/build/
+firmware/.pio/
+firmware/out/
+web/firmware/*.bin

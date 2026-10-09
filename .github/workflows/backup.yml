@@ -1,0 +1,39 @@
+# Nightly encrypted backup of the D1 database (plants, history, visitors, settings) into this repo.
+# Restore with: npm run restore  (see README, "Moving house").
+name: Nightly backup
+on:
+  schedule: [{ cron: '17 3 * * *' }]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  backup:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: { node-version: '22', cache: npm }
+      - run: npm ci
+      - name: Export D1
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+        run: npx wrangler d1 export atlantico --remote --output "$RUNNER_TEMP/atlantico.sql"
+      - name: Encrypt (the repo is public; names and Wi-Fi details must not be)
+        env:
+          BACKUP_PASSPHRASE: ${{ secrets.BACKUP_PASSPHRASE }}
+        run: |
+          test -n "$BACKUP_PASSPHRASE" || { echo "BACKUP_PASSPHRASE secret missing"; exit 1; }
+          mkdir -p backups
+          openssl enc -aes-256-cbc -pbkdf2 -iter 200000 -md sha256 -salt -in "$RUNNER_TEMP/atlantico.sql" \
+            -out backups/atlantico.sql.enc -pass env:BACKUP_PASSPHRASE
+          date -u +%FT%TZ > backups/LAST_BACKUP
+      - name: Commit
+        run: |
+          git config user.name "atlantico-backup"
+          git config user.email "actions@users.noreply.github.com"
+          git add backups
+          git commit -m "Nightly backup $(date -u +%F)" || exit 0
+          git push

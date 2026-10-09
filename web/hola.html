@@ -1,0 +1,138 @@
+<!doctype html>
+<html lang="es">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="theme-color" content="#0a0a0b">
+  <meta name="robots" content="noindex">
+  <title>Bienvenido · Atlántico</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:ital,wght@0,300;0,400;1,300&family=Inter:wght@200;300;400&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="css/base.css">
+  <style>
+    html, body { min-height: 100%; }
+    main { min-height: 100svh; display: grid; place-items: center; padding: 48px 16px; }
+    .card { width: min(420px, 100%); text-align: center; }
+    h1 { font-size: clamp(48px, 14vw, 72px); font-style: italic; letter-spacing: 0.01em; line-height: 1; }
+    .sub { color: var(--muted); font-size: 12px; letter-spacing: .2em; text-transform: uppercase; margin: 18px 0 56px; }
+    form { display: grid; gap: 28px; }
+    input[type=text] { text-align: center; font: 300 24px var(--serif); padding: 12px 0; width: 100%; }
+    .hp { position: absolute; left: -9999px; }
+    .en { display: block; color: var(--muted); font-size: 11px; letter-spacing: .08em; margin-top: 6px; text-transform: none; }
+    #done { display: none; }
+    #done h2 { font-size: clamp(40px, 11vw, 56px); font-style: italic; }
+    .wifi { margin: 48px auto 0; display: grid; gap: 18px; justify-items: center; }
+    .qr { background: #f2f0eb; padding: 14px; width: 196px; height: 196px; }
+    .qr img { display: block; }
+    .how { color: var(--muted); font-size: 13px; line-height: 1.7; max-width: 340px; }
+    .err { color: var(--warn); font-size: 13px; min-height: 1.4em; }
+    footer { margin-top: 56px; }
+  </style>
+</head>
+<body>
+  <canvas class="drift"></canvas>
+  <main>
+    <div class="card fade-in" id="ask">
+      <h1>Bienvenido</h1>
+      <p class="sub">Atlántico · Fuentebravía</p>
+      <form id="f" autocomplete="off">
+        <label class="field" for="name">Tu nombre<span class="en">Your first name</span></label>
+        <input type="text" id="name" name="name" maxlength="24" required autocapitalize="words" enterkeyhint="go" placeholder="—">
+        <input class="hp" type="text" name="website" tabindex="-1" aria-hidden="true">
+        <div><button class="btn" type="submit">Entrar</button></div>
+        <div class="err" id="err" role="status"></div>
+      </form>
+      <p class="meta" style="margin-top:40px">Solo guardamos tu nombre de pila. Puedes borrarlo cuando quieras.<br>Only your first name is kept. You can delete it any time.</p>
+    </div>
+
+    <div class="card" id="done">
+      <p class="eyebrow">Mira la pared · Look at the wall</p>
+      <h2 id="hello"></h2>
+      <div class="wifi" id="wifi" hidden>
+        <p class="eyebrow" style="margin:0">Wi-Fi</p>
+        <div class="qr" id="qr" aria-label="Código QR de la Wi-Fi"></div>
+        <div class="serif" style="font-size:22px" id="ssid"></div>
+        <div class="how">
+          En este teléfono: copia la contraseña y elige la red en Ajustes › Wi-Fi.
+          Android: mantén pulsado el código › “Escanear código QR”.<br>
+          Otro dispositivo: apunta la cámara al código.<br>
+          <span class="small">On this phone, copy the password and pick the network in Settings › Wi-Fi.
+          On another device, point the camera at the code.</span>
+        </div>
+        <div class="row" style="justify-content:center">
+          <button class="btn" id="copypw" type="button">Copiar contraseña · Copy</button>
+          <button class="btn quiet" id="showpw" type="button">Ver · Show</button>
+        </div>
+        <div class="serif" id="pw" hidden style="font-size:20px;letter-spacing:.06em;user-select:all"></div>
+      </div>
+      <footer>
+        <button class="btn quiet small" id="forget" type="button">Borrar mi visita · Delete my visit</button>
+      </footer>
+    </div>
+  </main>
+
+  <script src="config.js"></script>
+  <script src="vendor/qrcode-generator-1.4.4.js"></script>
+  <script type="module">
+    import { api, drift } from './js/api.js';
+    drift(document.querySelector('.drift'), { lines: 10, alpha: 0.06 });
+    const $ = (id) => document.getElementById(id);
+    const KEY = 'atlantico-visit';
+    const saved = () => { try { return JSON.parse(localStorage.getItem(KEY) ?? 'null'); } catch { return null; } };
+
+    api('/api/guest').then((g) => { if (g.greeting) document.querySelector('h1').textContent = g.greeting; }).catch(() => {});
+
+    const wifiString = (w) => {
+      const e = (s) => String(s).replace(/([\\;,:"])/g, '\\$1');
+      return `WIFI:T:${w.security};S:${e(w.ssid)};${w.security === 'nopass' ? '' : `P:${e(w.password)};`}${w.hidden ? 'H:true;' : ''};`;
+    };
+
+    function show(v) {
+      $('ask').style.display = 'none';
+      $('done').style.display = 'block';
+      $('done').classList.add('fade-in');
+      $('hello').textContent = `Hola, ${v.name}.`;
+      if (v.wifi) {
+        $('wifi').hidden = false;
+        $('ssid').textContent = v.wifi.ssid;
+        const qr = qrcode(0, 'M');
+        qr.addData(wifiString(v.wifi));
+        qr.make();
+        $('qr').innerHTML = qr.createImgTag(6, 0); // an <img>, so Android can long-press › scan
+        $('qr').querySelector('img').style.cssText = 'width:100%;height:100%;image-rendering:pixelated';
+        $('pw').textContent = v.wifi.password || '—';
+      }
+    }
+
+    $('f').addEventListener('submit', async (e) => {
+      e.preventDefault();
+      $('err').textContent = '';
+      const btn = e.submitter; btn.disabled = true;
+      try {
+        const v = await api('/api/arrive', { method: 'POST', body: { name: $('name').value, website: e.target.website.value } });
+        if (v.id) { try { localStorage.setItem(KEY, JSON.stringify({ id: v.id, token: v.deleteToken, name: v.name })); } catch {} }
+        show(v);
+      } catch (err) {
+        $('err').textContent = err.message;
+      } finally { btn.disabled = false; }
+    });
+
+    $('showpw').addEventListener('click', () => { $('pw').hidden = !$('pw').hidden; });
+    $('copypw').addEventListener('click', async (e) => {
+      try { await navigator.clipboard.writeText($('pw').textContent); e.target.textContent = 'Copiada · Copied'; }
+      catch { $('pw').hidden = false; }
+    });
+    $('forget').addEventListener('click', async () => {
+      const v = saved();
+      if (v) await api(`/api/visitors/${v.id}`, { method: 'DELETE', body: { token: v.token } }).catch(() => {});
+      try { localStorage.removeItem(KEY); } catch {}
+      $('done').innerHTML = '<p class="serif italic" style="font-size:28px">Borrado. Gracias.</p><p class="meta">Deleted. Thank you.</p>';
+    });
+
+    // A returning guest sees their delete option straight away.
+    const prev = saved();
+    if (prev && new URLSearchParams(location.search).has('mine')) show({ name: prev.name });
+  </script>
+</body>
+</html>
