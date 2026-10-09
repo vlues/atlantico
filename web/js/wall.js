@@ -64,11 +64,18 @@ function compFor(s, v, now) {
   });
 }
 
-let last = 0;
+// About 30 frames a second; slower computers (a Raspberry Pi behind a TV) drop to 15 by themselves.
+let last = 0, cost = 0;
 function frame(now) {
   requestAnimationFrame(frame);
-  if (!state || now - last < 33) return;
+  if (!state || now - last < (cost > 24 ? 66 : 33)) return;
   last = now;
+  const began = performance.now();
+  draw();
+  cost = cost * 0.9 + (performance.now() - began) * 0.1;
+}
+
+function draw() {
   const t = Date.now();
 
   // Play each welcome from the moment this screen hears about it, for at least 22 s. People who
@@ -104,7 +111,7 @@ function frame(now) {
   const singing = m && song && !playing && !touring ? (t - song.start) / 1000 : null;
   const hero = touring?.tour.stop === 'star' ? touring.tour.id : singing != null && singing < 25 ? m.by.id : null;
 
-  const dark = params.get('mode') === 'light' ? false : params.get('mode') === 'dark' ? true : state.dark || !!welcome;
+  const dark = params.get('mode') === 'light' ? false : params.get('mode') === 'dark' ? true : state.dark;
   const view = { dark, welcome, e, style, hero, starts: playing?.starts };
   const key = `${dark}|${playing ? `${playing.start}:${playing.starts.size}` : ''}|${touring?.key ?? ''}|${style ?? ''}`;
   if (shown.key !== key) shown = { key, view, at: t, fade: style ? 1200 : 3000, prev: shown.key ? shown.view : null };
@@ -162,6 +169,9 @@ canvas.addEventListener('click', async () => {
 });
 
 const display = screen({ api: API, canvas });
+// Kiosk (a screen that only runs this): no cursor, and sound on if asked for (?kiosk&sound).
+if (params.has('kiosk')) document.body.style.cursor = 'none';
+if (params.has('sound') && !soundWanted()) enableSound(true);
 addEventListener('resize', resize);
 resize();
 await refresh();

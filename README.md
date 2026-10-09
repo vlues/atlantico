@@ -4,12 +4,27 @@ A quiet smart-apartment system for a flat in Fuentebravía (El Puerto de Santa M
 
 - **The wall piece.** Fine lines drawn from the real sea outside: swell, wind, tide, sun, moon, clouds and rain. It shows on any screen and on an e-ink frame.
   - **A new edition every day.** Each midnight (Cádiz time) brings a numbered edition, such as *Nº 12 · Bandas · lunes 19 de octubre*. Each one has:
-    - its own drawing style: *Líneas*, *Puntos* (stipple), *Bandas* (the swell as bands of light), *Horizonte* (a few long lines under a big sky) or *Trazo* (calligraphic);
+    - its own drawing style, one of seven:
+      - *Líneas*;
+      - *Puntos* (stipple);
+      - *Bandas* (the swell as bands of light);
+      - *Horizonte* (a few long lines under a big sky);
+      - *Trazo* (calligraphic);
+      - *Relieve* (ridgelines, nearer waves hiding the ones behind, like a mountain-range print);
+      - *Contornos* (the bay as a topographic map);
     - its own palette, horizon height and grain.
     - Consecutive days never share a style or a palette.
+  - **Day and night.** The wall follows the real sky: paper by day, night after sunset.
+    - By day the sun hides the stars, as in life. Guests who are here are **sails on the bay** instead, heeling with the real wind, and a few gulls drift across.
+    - At dusk the sails go in as the stars come out.
+    - A daytime arrival is a wake crossing the bay and a sail being hoisted; a night arrival is a shooting star.
   - **The sky is live.**
     - The moon appears with its real phase and position, and lights a path on the water at night.
-    - Clouds drift with the wind; rain slants with it.
+    - Weather is drawn like an engraving's sky, and drifts with the real wind:
+      - fair days get wisps of cirrus;
+      - building cloud gets billowing cumulus with shaded bases;
+      - overcast is a hatched grey ceiling;
+      - rain falls in slanting curtains from the clouds and rings the water where it lands.
     - The captions add sea temperature, the tide (rising or falling, and when the next high or low water is) and the moon.
 - **Guest arrival.** Guests tap an NFC tag or scan a QR code and type their first name. Each guest gets their own star in the sky of the wall piece, and the lights go to Hosting. They also get the Wi-Fi.
   - **On arrival:** for 30 seconds, every screen plays the arrival. A shooting star lands on the guest's star, it ignites and reflects on the sea, and their name appears with a personal line. A first visit reads *tu estrella, desde hoy · llegas con levante*; a return reads *tercera visita · la anterior, hace 12 días*.
@@ -181,6 +196,7 @@ Change the night setting and OLED care per screen in **Devices**; the screen pic
 
 | | Pick | Why | Holds it, no screws |
 |---|---|---|---|
+| **Just Atlántico, big** | A matte art TV (**Hisense CanvasTV 55″** or The Frame) with a **Raspberry Pi 5** behind it, about $90 | The TV only ever shows the wall. It starts on power-up, comes back by itself, and the Pi switches the TV off at night and on in the morning (HDMI-CEC). | A **floor easel stand** rated 35 kg+, or a **floor-to-ceiling tension pole** (Neomounts FPMA-CF200: 37–70″, 30 kg) against a solid ceiling. |
 | Best for Atlántico | **TCL NXTPAPER 14** (≈ 760 g) or **NXTPAPER 11** (≈ 500 g), about $170–350 | A matte, paper-like screen: no reflections, and the light palettes read like print. | A slim case plus **4 pairs of Command Large picture-hanging strips**. They're rated 16 lb (≈ 7 kg) for four pairs, about ten times the tablet. Or a **tabletop easel stand** on a shelf. |
 | The big statement | **Hisense CanvasTV** (best value), **Samsung The Frame** (most polished), **TCL NXTFRAME** | A matte art TV at 55″ and up. Atlántico runs in its web browser, not its Art Mode. | A **floor easel stand** rated 35 kg or more for 43–65″ (VIVO, ECOTINY or KONIC, about $100), or Samsung's Studio Stand. A 55″ CanvasTV weighs about 18 kg, so **never use adhesive**. |
 | Deepest night sky | Any **OLED** tablet or TV | True black, so only the lines and stars glow. | As above, by weight. Turn on OLED care. |
@@ -191,6 +207,16 @@ Change the night setting and OLED care per screen in **Devices**; the screen pic
 - Put the strips on a case or frame, never on the tablet itself.
 - Keep any load well under the rating.
 - Floor easels: stand them against a wall, out of the way, and skip anti-tip straps that need a screw.
+
+**A Raspberry Pi behind a TV (the dedicated screen):**
+1. Put Raspberry Pi OS (with desktop) on a microSD card with **Raspberry Pi Imager**, setting your Wi-Fi and a user there.
+2. Plug the Pi into the TV, open Terminal on it, and paste the line shown on **Add device → Screen**: `curl -fsSL https://vlues.github.io/atlantico/kiosk.sh | bash`.
+3. It sets up the following, then reboots:
+   - automatic login;
+   - the wall full screen with sound, restarted by itself if it ever closes;
+   - no screen blanking;
+   - optionally, TV off 00:30–07:00 (turn on HDMI-CEC in the TV: Anynet+ on Samsung, CEC on Hisense, T-Link on TCL).
+4. The wall shows a 4-digit code. Scan it with your phone to add the screen.
 
 **Keeping it on:**
 - **iPad:** Add to Home Screen, then use Guided Access and set Auto-Lock to Never.

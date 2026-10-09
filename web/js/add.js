@@ -32,8 +32,11 @@ const KITS = [
     ['Slim case for it + Command Large picture-hanging strips (4 pairs)', 'Strips on the case, not the tablet. Rated 16 lb (≈ 7 kg) per 4 pairs. Smooth painted walls only.', '≈ $15 + 10', 'Command large picture hanging strips'],
     ['…or a tabletop easel tablet stand', 'For gotelé or wallpaper, or a shelf or sideboard. Holds it upright, no wall at all.', '≈ $20–35', 'aluminium tablet stand easel 14 inch'],
     ['Long USB-C cable (3 m, flat, white or black)', 'Keeps it powered; run it down behind furniture.', '≈ $10', 'USB C cable 3m flat'],
-    ['Hisense CanvasTV 55″ (or Samsung The Frame / TCL NXTFRAME)', 'The big statement. About 18 kg: never on adhesive strips.', '≈ $900–1,500', 'Hisense CanvasTV 55'],
+    ['Hisense CanvasTV 55″ (or Samsung The Frame / TCL NXTFRAME)', 'The big statement, matte like a print. About 18 kg: never on adhesive strips.', '≈ $900–1,500', 'Hisense CanvasTV 55'],
+    ['Raspberry Pi 5 (4 GB) + official case + 27 W USB-C power supply + 32 GB microSD', 'Behind the TV: it only ever shows Atlántico, and turns the TV off at night.', '≈ $90–110', 'Raspberry Pi 5 4GB starter kit'],
+    ['Micro-HDMI to HDMI cable (1 m)', 'Pi to TV.', '≈ $8', 'micro HDMI to HDMI cable 1m'],
     ['Floor easel TV stand, 43–65″, rated 35 kg+', 'Holds an art TV with no wall fixing. VIVO, ECOTINY or KONIC tripods.', '≈ $100–120', 'tripod easel TV stand 43-65 inch'],
+    ['…or a floor-to-ceiling tension pole mount (Neomounts FPMA-CF200, 37–70″, 30 kg)', 'Presses between floor and ceiling: no holes. Needs a solid ceiling (not a drop ceiling).', '≈ $150–250', 'Neomounts FPMA-CF200 floor to ceiling'],
   ] },
   { title: 'Colour e-ink instead (optional)', note: 'Swap the panel above for six-colour e-ink: guests who are here show in colour.', items: [
     ['Waveshare 7.3″ e-Paper (E) Spectra 6', 'The colour display.', '≈ $80', 'Waveshare 7.3 Spectra 6 e-paper'],
@@ -207,6 +210,7 @@ async function waitPaired(c) {
 // ── Screens ───────────────────────────────────────────────────────────────────
 function setupScreen() {
   const url = new URL('wall', location.href).href;
+  $('kioskcmd').textContent = `curl -fsSL ${new URL('kiosk.sh', location.href).href} | bash`;
   $('wallurl').textContent = url.replace(/^https?:\/\//, '');
   if (window.qrcode && !$('wallqr').innerHTML) {
     const qr = window.qrcode(0, 'M');

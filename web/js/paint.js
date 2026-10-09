@@ -32,26 +32,29 @@ export function paint(ctx, comp, alpha = 1, e = null) {
   ctx.lineCap = 'round';
   ctx.lineJoin = 'round';
   // Strokes that look alike are drawn as one path: thousands of short strokes stay smooth.
-  const groups = new Map();
-  for (const l of comp.lines) {
-    const key = `${l.alpha.toFixed(2)}|${l.weight ?? 1}|${l.accent ?? ''}|${l.dash ? l.dash.map((v) => v.toFixed(1)).join(',') : l.dotted ? 'dot' : ''}`;
-    let g = groups.get(key);
-    if (!g) groups.set(key, (g = { l, list: [] }));
-    g.list.push(l.pts);
-  }
-  for (const { l, list } of groups.values()) {
-    ctx.globalAlpha = alpha * l.alpha;
-    ctx.strokeStyle = col(l.accent);
-    ctx.lineWidth = sw * (l.weight ?? 1);
-    ctx.setLineDash(l.dash ? [Math.max(0.01, l.dash[0]), l.dash[1]] : l.dotted ? [sw, sw * 5] : []);
-    ctx.beginPath();
-    for (const pts of list) {
-      ctx.moveTo(pts[0], pts[1]);
-      for (let k = 2; k < pts.length; k += 2) ctx.lineTo(pts[k], pts[k + 1]);
+  const strokes = (lines) => {
+    const groups = new Map();
+    for (const l of lines) {
+      const key = `${l.alpha.toFixed(2)}|${l.weight ?? 1}|${l.accent ?? ''}|${l.dash ? l.dash.map((v) => v.toFixed(1)).join(',') : l.dotted ? 'dot' : ''}`;
+      let g = groups.get(key);
+      if (!g) groups.set(key, (g = { l, list: [] }));
+      g.list.push(l.pts);
     }
-    ctx.stroke();
-  }
-  ctx.setLineDash([]);
+    for (const { l, list } of groups.values()) {
+      ctx.globalAlpha = alpha * l.alpha;
+      ctx.strokeStyle = col(l.accent);
+      ctx.lineWidth = sw * (l.weight ?? 1);
+      ctx.setLineDash(l.dash ? [Math.max(0.01, l.dash[0]), l.dash[1]] : l.dotted ? [sw, sw * 5] : []);
+      ctx.beginPath();
+      for (const pts of list) {
+        ctx.moveTo(pts[0], pts[1]);
+        for (let k = 2; k < pts.length; k += 2) ctx.lineTo(pts[k], pts[k + 1]);
+      }
+      ctx.stroke();
+    }
+    ctx.setLineDash([]);
+  };
+  strokes(comp.lines);
   for (const sh of comp.shapes ?? []) {
     ctx.globalAlpha = alpha * sh.alpha;
     ctx.fillStyle = col(sh.accent);
@@ -61,6 +64,7 @@ export function paint(ctx, comp, alpha = 1, e = null) {
     ctx.closePath();
     ctx.fill();
   }
+  strokes(comp.marks ?? []);
   ctx.lineWidth = sw;
   for (const c of comp.circles) {
     ctx.globalAlpha = alpha * c.alpha;
@@ -147,6 +151,36 @@ export function arrival(ctx, comp, e, seed = 0, target = comp.hero) {
   const sw = Math.max(0.7, S / 1100);
   ctx.save();
   ctx.strokeStyle = ctx.fillStyle = ctx.shadowColor = gold;
+
+  if (h.kind === 'sail') {
+    // By day: a wake crosses the bay to where their sail will be, then rings open on the water.
+    const dir = rnd(seed, 1) < 0.5 ? 1 : -1, y = h.water, z = h.size;
+    const p = clamp01((e - 0.2) / (LAND_S - 0.2)), u = 1 - (1 - p) * (1 - p);
+    if (e < LAND_S + 0.6) {
+      const x0 = h.x - dir * W * (0.14 + 0.1 * rnd(seed, 2)), bx = x0 + (h.x - x0) * u;
+      const len = Math.abs(bx - x0), fade = 1 - clamp01((e - LAND_S) / 0.6);
+      for (const side of [-1, 1]) {
+        ctx.globalAlpha = 0.55 * fade;
+        ctx.lineWidth = sw;
+        ctx.beginPath();
+        ctx.moveTo(bx, y);
+        ctx.lineTo(bx - dir * len, y + side * Math.min(z * 0.5, len * 0.12));
+        ctx.stroke();
+      }
+      ctx.globalAlpha = 0.3 * fade;
+      ctx.beginPath(); ctx.moveTo(bx, y); ctx.lineTo(bx - dir * len * 0.7, y); ctx.stroke();
+    }
+    const k0 = e - LAND_S;
+    for (let i = 0; i < 3 && k0 > 0; i++) {
+      const k = clamp01((k0 - i * 0.4) / 2.6);
+      if (k <= 0 || k >= 1) continue;
+      ctx.globalAlpha = (1 - k) * (1 - k) * 0.6;
+      ctx.lineWidth = sw * (1.3 - k * 0.7);
+      ctx.beginPath(); ctx.ellipse(h.x, y, S * (0.02 + 0.14 * Math.pow(k, 0.7)), S * (0.005 + 0.035 * Math.pow(k, 0.7)), 0, 0, Math.PI * 2); ctx.stroke();
+    }
+    ctx.restore();
+    return;
+  }
 
   // A meteor from the far side of the sky, slowing as it arrives.
   const t0 = 0.25;

@@ -47,7 +47,6 @@ export const PRESENT_MS = 6 * 3600000;
 export const isHere = (v: { last_seen: number | null; left_at: number | null }, t = Date.now()) =>
   v.last_seen != null && v.last_seen > t - PRESENT_MS && !(v.left_at != null && v.left_at >= v.last_seen);
 
-const DARK_SCENES = new Set(['hosting', 'evening']);
 
 // Demo: fixed sun positions (as seen from Fuentebravía) to preview times of day.
 export const SUN_PRESETS: Record<string, { altitude: number; azimuth: number }> = {
@@ -105,7 +104,8 @@ export async function wallState(env: Env, scenario?: string | null): Promise<Wal
     music: set['music:now'] ?? null,
     sunOverride: sunOverride && SUN_PRESETS[sunOverride] ? sunOverride : null,
     scene: s, lat, lon, visitors, welcome: active,
-    dark: !!active || DARK_SCENES.has(s) || sun.altitude < -2,
+    // The wall follows the real sky: paper by day, night after sunset (whatever the lights do).
+    dark: sun.altitude < -2,
   };
 }
 

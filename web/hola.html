@@ -105,7 +105,7 @@
       <p class="line" id="line"></p>
       <figure class="sky" id="skyfig" hidden>
         <canvas id="sky" aria-label="Your star in the sky of the wall piece"></canvas>
-        <figcaption class="eyebrow">Tu estrella<span class="en">Your star</span></figcaption>
+        <figcaption class="eyebrow" id="skycap">Tu estrella<span class="en">Your star</span></figcaption>
       </figure>
       <div class="wifi" id="wifi" hidden>
         <p class="eyebrow" style="margin:0">Wi-Fi</p>
@@ -257,6 +257,7 @@
       const reduce = matchMedia('(prefers-reduced-motion: reduce)').matches;
       const start = performance.now() - (reduce ? 8000 : 0);
       const lat = state?.lat ?? 36.5986, lon = state?.lon ?? -6.2797;
+      let shownDay = null;
       const draw = (now) => {
         const dpr = Math.min(2, devicePixelRatio || 1);
         const w = Math.round(canvas.clientWidth * dpr), h = Math.round(w * 0.62);
@@ -264,10 +265,12 @@
         const e = (now - start) / 1000;
         // Composed taller than shown, so the sky gets most of the frame and the sea just shows.
         const comp = compose({ ...c, sun: sunPosition(new Date(), lat, lon), moon: moonPosition(new Date(), lat, lon) }, {
-          width: w, height: Math.round(w * 1.15), dark: true, captions: false, date: Date.now(), style: state?.style,
+          width: w, height: Math.round(w * 1.15), dark: sunPosition(new Date(), lat, lon).altitude < -2, captions: false, date: Date.now(), style: state?.style,
           visitors, hero: v.id, reveal: revealAt(e), time: Date.now() / 1000, lat, lon,
         });
         paint(ctx, comp, 1, null);
+        // By day they are a sail on the bay; by night a star.
+        if (comp.byDay !== shownDay) { shownDay = comp.byDay; $('skycap').innerHTML = comp.byDay ? 'Tu vela<span class="en">Your sail · a star again tonight</span>' : 'Tu estrella<span class="en">Your star</span>'; }
         arrival(ctx, comp, e, hashString(`${v.id}:${start}`));
         if (e < 90 && !reduce) requestAnimationFrame(draw);
       };

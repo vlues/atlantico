@@ -11,8 +11,8 @@ export const COPY = {
   },
   star: {
     es: 'Tu estrella', en: 'Your star',
-    bodyEs: 'Cada persona que ha pasado por esta casa tiene una estrella en el cielo de la pared, siempre en el mismo sitio. La tuya brilla en dorado mientras estás aquí.',
-    bodyEn: "Everyone who has stayed here has a star in the wall's sky, always in the same place. Yours shines gold while you're here.",
+    bodyEs: 'Cada persona que ha pasado por esta casa tiene una estrella en el cielo de la pared, siempre en el mismo sitio. La tuya brilla en dorado mientras estás aquí. De día, cuando el sol esconde las estrellas, eres una vela en la bahía.',
+    bodyEn: "Everyone who has stayed here has a star in the wall's sky, always in the same place. Yours shines gold while you're here. By day, when the sun hides the stars, you are a sail on the bay.",
   },
   edition: {
     es: 'Un dibujo nuevo cada día', en: 'A new drawing every day',

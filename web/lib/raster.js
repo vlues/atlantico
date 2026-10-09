@@ -124,7 +124,7 @@ export function rasterize(comp, colors = 2, opts = {}) {
   // Filled polygons (dots, the moon) straight into the frame.
   const fill = (contours, t) => scan(contours, w, h, (px, py, a) => put(py * w + px, a, t));
 
-  for (const l of comp.lines) {
+  const stroke = (l) => {
     const p = l.pts;
     if (l.dash) {
       // Dashes (and dots, when the dash is zero long) walked along the polyline.
@@ -140,7 +140,7 @@ export function rasterize(comp, colors = 2, opts = {}) {
         }
         at += len;
       }
-      continue;
+      return;
     }
     if (l.dotted) {
       for (let k = 2; k < p.length; k += 2) {
@@ -150,14 +150,20 @@ export function rasterize(comp, colors = 2, opts = {}) {
           seg(x, y, x, y, baseW * 0.9, 1, 0);
         }
       }
-      continue;
+      return;
     }
     // Distant (faint) lines get thinner rather than grey: they break up like an engraving.
     const lw = baseW * (0.55 + 0.45 * l.alpha) * (l.weight ?? 1);
     const t = tintOf(l.accent);
     for (let k = 2; k < p.length; k += 2) seg(p[k - 2], p[k - 1], p[k], p[k + 1], lw, 1, t);
+  };
+  for (const l of comp.lines) stroke(l);
+  // Shapes: inks, or "paper" that hides what is behind (a boat in front of the sea).
+  for (const sh of comp.shapes ?? []) {
+    if (sh.accent === 'bg') scan([sh.pts], w, h, (px, py, a) => { if (a > 0.3) cov[py * w + px] = 0; });
+    else fill([sh.pts], tintOf(sh.accent));
   }
-  for (const sh of comp.shapes ?? []) fill([sh.pts], tintOf(sh.accent));
+  for (const l of comp.marks ?? []) stroke(l);
   for (const c of comp.circles) {
     const t = tintOf(c.accent);
     if (c.fill) {

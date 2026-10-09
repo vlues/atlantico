@@ -49,8 +49,10 @@ export function windName(speed, dir) {
 // Every day is a new numbered edition: its own drawing style, palette, horizon and grain, so the
 // same sea never looks the same twice. Consecutive days never share a style or a palette.
 
-export const STYLES = ['lineas', 'puntos', 'bandas', 'horizonte', 'trazo'];
-export const STYLE_NAMES = { lineas: 'Líneas', puntos: 'Puntos', bandas: 'Bandas', horizonte: 'Horizonte', trazo: 'Trazo' };
+export const STYLES = ['lineas', 'puntos', 'bandas', 'horizonte', 'trazo', 'relieve', 'contornos'];
+export const STYLE_NAMES = {
+  lineas: 'Líneas', puntos: 'Puntos', bandas: 'Bandas', horizonte: 'Horizonte', trazo: 'Trazo', relieve: 'Relieve', contornos: 'Contornos',
+};
 
 // Screen palettes (e-ink always uses its own inks). Each has a paper and a night version.
 export const PALETTES = [
@@ -179,6 +181,7 @@ export function compose(c, o = {}) {
   const spacing = o.print ? Math.max(6, S * 0.0135) : Math.max(4.2, S * 0.0105);
   let N = o.lineCount ?? clamp(Math.round((fh / spacing) * ed.density), 22, 90);
   if (style === 'horizonte' && o.lineCount == null) N = clamp(Math.round(N * 0.4), 10, 30);
+  if (style === 'relieve' && o.lineCount == null) N = clamp(Math.round(N * 0.6), 18, 52);
   const step = o.print ? Math.max(3, W / 260) : Math.max(1.5, W / 420);
 
   // Swell: height drives band contrast, period drives band length, direction tilts the bands.
@@ -220,24 +223,33 @@ export function compose(c, o = {}) {
   }
 
   const persp = (z) => (z >= 0 ? 0.5 * z + 0.5 * Math.pow(z, 1.5) : 0.5 * z);
+  // The sea surface: displacement (in line spacings) at u across, s deep, and the swell's phase.
+  const surface = (u, s) => {
+    const env = 0.35 + 0.65 * s;
+    const swell = Math.sin(TAU * ((s * Math.cos(r) + u * Math.sin(r) * (fw / fh)) / lambda - drift));
+    let d = swellAmp * env * swell;
+    d += underAmp * env * Math.sin(TAU * (u * k2 + s * 0.45 - drift * 0.6) + noise(u * grain, s * 2, seed) * 1.2);
+    const bu = 2 * (u - bowC);
+    d -= bend * Math.abs(ex) * (0.6 - Math.min(1, bu * bu)) * (0.55 + 0.45 * s);
+    d += bend * ny * (u - 0.5) * 0.9;
+    d += chop * noise(u * 46 + t * 0.03, s * (N - 1) * 0.35, seed + 3);
+    return [d, swell];
+  };
+  // Relieve: ridgelines whose peaks rise where the sea is busiest, like a mountain-range print.
+  const peakC = 0.5 + (ed.grain - 0.5) * 0.3;
+  const ridge = (u, s, d) => horizon + fh * persp(s) - (Math.abs(d) + 0.15) * (fh / (N - 1)) * (0.9 + 1.4 * hN) *
+    (0.6 + 3.2 * Math.exp(-(((u - peakC) / 0.2) ** 2))) * (0.4 + 0.6 * s);
   const rows = []; // the sea, one polyline per line (split where the sun glitters)
   for (let i = 0; i < N; i++) {
     const s = i / (N - 1);
-    const env = 0.35 + 0.65 * s;
     let cur = [], ph = [];
     const flush = () => { if (cur.length >= 4) rows.push({ pts: cur, ph, alpha: 0.45 + 0.55 * Math.min(1, s * 3), row: s }); cur = []; ph = []; };
     for (let x = mx; x <= W - mx + 0.01; x += step) {
       const u = (x - mx) / fw;
-      const swell = Math.sin(TAU * ((s * Math.cos(r) + u * Math.sin(r) * (fw / fh)) / lambda - drift));
-      let d = swellAmp * env * swell;
-      d += underAmp * env * Math.sin(TAU * (u * k2 + s * 0.45 - drift * 0.6) + noise(u * grain, s * 2, seed) * 1.2);
-      const bu = 2 * (u - bowC);
-      d -= bend * Math.abs(ex) * (0.6 - Math.min(1, bu * bu)) * (0.55 + 0.45 * s);
-      d += bend * ny * (u - 0.5) * 0.9;
-      d += chop * noise(u * 46 + t * 0.03, i * 0.35, seed + 3);
-      const y = Math.min(H * 0.89, horizon + fh * persp(s + d / (N - 1)));
+      const [d, swell] = surface(u, s);
+      const y = style === 'relieve' ? ridge(u, s, d) : Math.min(H * 0.89, horizon + fh * persp(s + d / (N - 1)));
 
-      if (sunMark && sunMark.alt < 38) {
+      if (sunMark && sunMark.alt < 38 && style !== 'relieve') {
         const half = sunMark.r * (0.8 + 3.2 * s);
         const dd = Math.abs(x - sunMark.x) / half;
         if (dd < 1) {
@@ -253,7 +265,45 @@ export function compose(c, o = {}) {
 
   // The day's style: the same sea, drawn another way.
   const lines = [];
-  for (const l of rows) {
+  if (style === 'relieve') {
+    // Nearer ridges hide the ones behind them.
+    const env = new Float64Array(rows[0]?.pts.length / 2 || 0).fill(Infinity);
+    for (let k = rows.length - 1; k >= 0; k--) {
+      const l = rows[k], gap = S * 0.0025;
+      let seg = [];
+      for (let q = 0; q < l.pts.length; q += 2) {
+        const y = l.pts[q + 1], e = env[q / 2];
+        if (y < e - gap) seg.push(l.pts[q], y);
+        else { if (seg.length >= 4) lines.push({ pts: seg, alpha: l.alpha, row: l.row, weight: 1.15 }); seg = []; }
+        if (y < e) env[q / 2] = y;
+      }
+      if (seg.length >= 4) lines.push({ pts: seg, alpha: l.alpha, row: l.row, weight: 1.15 });
+    }
+  } else if (style === 'contornos') {
+    // The sea as a map: lines of equal height across the water (marching squares).
+    const gx = clamp(Math.round(fw / (o.print ? 7 : 9)), 60, 180), gy = clamp(Math.round(fh / (o.print ? 7 : 9)), 24, 70);
+    const inv = (z) => { let a = 0, b = 1; for (let k = 0; k < 18; k++) { const m = (a + b) / 2; if (persp(m) < z) a = m; else b = m; } return (a + b) / 2; };
+    const sOf = Array.from({ length: gy + 1 }, (_, j) => inv(j / gy));
+    const F = Array.from({ length: gy + 1 }, (_, j) => Float64Array.from({ length: gx + 1 }, (_, i) => surface(i / gx, sOf[j])[0] + sOf[j] * 2.2));
+    let lo = Infinity, hi = -Infinity;
+    for (const row of F) for (const v of row) { lo = Math.min(lo, v); hi = Math.max(hi, v); }
+    const nL = clamp(Math.round(10 + 8 * hN), 10, 20);
+    const X = (i) => mx + (fw * i) / gx, Y = (j) => horizon + (fh * j) / gy;
+    for (let li = 1; li < nL; li++) {
+      const L = lo + ((hi - lo) * li) / nL;
+      const alpha = 0.5 + 0.5 * (li % 4 === 0 ? 1 : 0.6), weight = li % 4 === 0 ? 1.25 : 0.85; // every fourth line heavier, like a map
+      for (let j = 0; j < gy; j++) for (let i = 0; i < gx; i++) {
+        const a = F[j][i], b = F[j][i + 1], cc = F[j + 1][i + 1], d = F[j + 1][i];
+        const idx = (a > L ? 8 : 0) | (b > L ? 4 : 0) | (cc > L ? 2 : 0) | (d > L ? 1 : 0);
+        if (idx === 0 || idx === 15) continue;
+        const f = (p, q) => (L - p) / (q - p || 1e-9);
+        const T = [X(i + f(a, b)), Y(j)], R = [X(i + 1), Y(j + f(b, cc))], B = [X(i + f(d, cc)), Y(j + 1)], Lf = [X(i), Y(j + f(a, d))];
+        const segs = { 1: [Lf, B], 2: [B, R], 3: [Lf, R], 4: [T, R], 5: [Lf, T, B, R], 6: [T, B], 7: [Lf, T], 8: [Lf, T], 9: [T, B], 10: [Lf, B, T, R], 11: [T, R], 12: [Lf, R], 13: [B, R], 14: [Lf, B] }[idx];
+        for (let k = 0; k < segs.length; k += 2) lines.push({ pts: [...segs[k], ...segs[k + 1]], alpha, row: (j + 0.5) / gy, weight });
+      }
+    }
+  }
+  for (const l of style === 'relieve' || style === 'contornos' ? [] : rows) {
     const base = { alpha: l.alpha, row: l.row };
     if (style === 'puntos') {
       // Stipple: round dots, larger and further apart toward the viewer.
@@ -282,34 +332,133 @@ export function compose(c, o = {}) {
     }
   }
 
-  // Weather in the sky, live: clouds as stacked strokes drifting with the wind, rain slanting with it.
+  // Where the water is: the y of the sea line at depth `s` (0 horizon … 1 near) under x.
+  const waterY = (sd, x) => {
+    let best = null, bd = Infinity;
+    for (const l of rows) {
+      const d = Math.abs(l.row - sd), p = l.pts;
+      if (d > bd || x < p[0] || x > p[p.length - 2]) continue;
+      bd = d; best = l;
+    }
+    if (!best) return horizon + fh * persp(sd);
+    const p = best.pts;
+    let q = 0;
+    while (q + 2 < p.length && p[q + 2] < x) q += 2;
+    const f = clamp((x - p[q]) / Math.max(1e-6, (p[q + 2] ?? p[q]) - p[q]), 0, 1);
+    return p[q + 1] + ((p[q + 3] ?? p[q + 1]) - p[q + 1]) * f;
+  };
+
+  // ── Weather, live, drawn like an engraving's sky ──────────────────────────────
+  // Fair days: a few wisps of cirrus. As cloud builds: cumulus with scalloped tops and a shaded
+  // base. Overcast: a hatched grey ceiling. Rain falls in slanting curtains from the clouds and rings
+  // the water where it lands. All of it drifts with the real wind.
   const sky = { x0: mx, x1: W - mx, y0: H * 0.1, y1: horizon - S * 0.05 };
-  const weather = [];
-  const nClouds = Math.round(clamp((c.cloudCover ?? 0) / 100, 0, 1) * 7);
-  for (let k = 0; k < nClouds; k++) {
-    const L = S * (0.1 + 0.16 * hash(k, 1, seed + 5));
-    const span = fw + L;
-    const moved = o.print ? 0 : t * (2 + ws * 0.15) * (ex >= 0 ? 1 : -1);
-    const cx = mx - L / 2 + ((((hash(k, 2, seed + 5) * span + moved) % span) + span) % span);
-    const cy = sky.y0 + (sky.y1 - S * 0.02 - sky.y0) * Math.pow(hash(k, 3, seed + 5), 0.6);
-    for (let j = 0; j < 3; j++) {
-      const len = L * [1, 0.7, 0.42][j], x0 = Math.max(mx, cx - len / 2 + L * 0.08 * j), x1 = Math.min(W - mx, cx + len / 2 + L * 0.08 * j);
-      if (x1 - x0 > S * 0.01) weather.push({ pts: [x0, cy + j * S * 0.008, x1, cy + j * S * 0.008], alpha: 0.42 - 0.1 * j, weight: 0.9 });
+  const skyH = Math.max(1, sky.y1 - sky.y0);
+  const rain = c.precipitation ?? 0;
+  const cover = Math.max(clamp((c.cloudCover ?? 0) / 100, 0, 1), rain > 0.05 ? 0.72 : 0);
+  const wdir = ex >= 0 ? 1 : -1;
+  const windShift = o.print ? 0 : t * (1.5 + ws * 0.12) * wdir;
+  const ink = o.print ? { a: 0.8, w: 1 } : { a: 0.42, w: 0.75 };
+  const weather = [], ripples = [];
+  // Only what lies between the margins (clouds drift in from one side and out of the other).
+  const add = (pts, alpha, weight, into = weather) => {
+    let seg = [];
+    const flush = () => { if (seg.length >= 4) into.push({ pts: seg, alpha: Math.min(1, alpha), weight }); seg = []; };
+    for (let q = 0; q < pts.length; q += 2) {
+      if (pts[q] >= mx && pts[q] <= W - mx) seg.push(pts[q], pts[q + 1]); else flush();
+    }
+    flush();
+  };
+  const drifting = (k, len, salt) => { const span = fw + len; return mx - len / 2 + ((((hash(k, salt, seed) * span + windShift) % span) + span) % span); };
+
+  if (cover > 0.04 && cover < 0.6) {
+    // Cirrus: long fine strands high up, each with a hook at its downwind end.
+    const n = 1 + Math.round(clamp((cover - 0.04) / 0.4, 0, 1) * 3);
+    for (let k = 0; k < n; k++) {
+      const L = fw * (0.16 + 0.18 * hash(k, 21, seed));
+      const cx = drifting(k, L, 22), cy = sky.y0 + skyH * 0.45 * hash(k, 23, seed);
+      for (let j = 0; j < 2; j++) {
+        const len = L * (j ? 0.55 : 1), pts = [];
+        for (let q = 0; q <= 28; q++) {
+          const u = q / 28, uw = wdir > 0 ? u : 1 - u;
+          const hook = uw > 0.8 ? Math.pow((uw - 0.8) / 0.2, 2) * S * 0.016 : 0;
+          pts.push(cx - len / 2 + len * u + j * L * 0.14, cy + j * S * 0.006 + Math.sin(u * Math.PI * 1.4 + k) * S * 0.004 - hook);
+        }
+        add(pts, ink.a * (j ? 0.65 : 0.9), ink.w * 0.9);
+      }
     }
   }
-  const rain = c.precipitation ?? 0;
-  if (rain > 0.05) {
-    const n = Math.round(clamp(rain / 2, 0.15, 1) * (o.print ? 50 : 130));
-    const len = S * 0.022, slant = clamp(ex * (0.15 + wN), -0.7, 0.7), range = horizon - H * 0.08;
+  const clouds = []; // their bases, where rain falls from
+  const nCu = cover < 0.2 ? 0 : 1 + Math.round(clamp((cover - 0.2) / 0.55, 0, 1) * 3);
+  for (let k = 0; k < nCu; k++) {
+    // Cumulus: rounded billows (the top edge of a few overlapping circles, biggest in the middle)
+    // over a flat base, with two strokes of shade inside.
+    const wC = S * (0.13 + 0.12 * hash(k, 31, seed)), hC = wC * (0.32 + 0.16 * hash(k, 32, seed));
+    const cx = drifting(k, wC, 33);
+    const base = sky.y0 + hC + Math.max(0, skyH - hC - S * 0.02) * (0.3 + 0.6 * hash(k, 34, seed));
+    const nb = 4 + Math.floor(hash(k, 35, seed) * 4);
+    const puffs = Array.from({ length: nb }, (_, b) => {
+      const f = (b + 0.5) / nb, rise = Math.sin(Math.PI * f);
+      const rr = (wC / nb) * (0.75 + 0.35 * rise) * (0.85 + 0.35 * hash(k, 37 + b, seed));
+      return { x: cx - wC / 2 + wC * (0.08 + 0.84 * f), y: base - rr * 0.5 - hC * 0.55 * rise * (0.7 + 0.3 * hash(k, 47 + b, seed)), r: rr };
+    });
+    const top = [];
+    for (let q = 0; q <= 64; q++) {
+      const x = cx - wC / 2 + (wC * q) / 64;
+      let y = base;
+      for (const pf of puffs) { const dx = x - pf.x; if (Math.abs(dx) < pf.r) y = Math.min(y, pf.y - Math.sqrt(pf.r * pf.r - dx * dx)); }
+      if (y < base - 0.5 || top.length) top.push(x, y);
+    }
+    while (top.length > 4 && top[top.length - 1] >= base - 0.5) top.splice(-2, 2);
+    add(top, ink.a * 1.15, ink.w * 1.1);
+    add([cx - wC * 0.4, base, cx + wC * 0.42, base], ink.a * 0.75, ink.w);
+    add([cx - wC * 0.3, base - hC * 0.15, cx + wC * 0.18, base - hC * 0.15], ink.a * 0.5, ink.w * 0.8);
+    add([cx - wC * 0.16, base - hC * 0.28, cx + wC * 0.04, base - hC * 0.28], ink.a * 0.35, ink.w * 0.8);
+    clouds.push({ x0: cx - wC * 0.38, x1: cx + wC * 0.38, y: base });
+  }
+  if (cover >= 0.7) {
+    // Overcast: a ceiling of broken hatching, denser toward the top.
+    const n = 3 + Math.round(clamp((cover - 0.7) / 0.3, 0, 1) * 5);
     for (let k = 0; k < n; k++) {
-      const x = mx + hash(k, 7, seed) * fw;
-      const y = H * 0.08 + ((hash(k, 8, seed) * range + (o.print ? 0 : t * S * 0.3)) % range);
-      weather.push({ pts: [x, y, x + slant * len, y + len], alpha: 0.4, weight: 0.75 });
+      const y = sky.y0 + skyH * 0.58 * (k / Math.max(1, n - 1)) + S * 0.004 * hash(k, 41, seed);
+      let seg = [];
+      for (let x = mx; x <= W - mx + 0.01; x += step * 2) {
+        const bucket = Math.floor((x - windShift * 0.5) / (S * 0.055));
+        if (hash(bucket, k * 7 + 42, seed) < 0.24 + 0.2 * (k / n)) { add(seg, ink.a * (0.8 - 0.35 * k / n), ink.w * 0.8); seg = []; continue; }
+        seg.push(x, y + Math.sin((x - windShift * 0.5) / (S * 0.16) + k) * S * 0.003);
+      }
+      add(seg, ink.a * (0.8 - 0.35 * k / n), ink.w * 0.8);
+    }
+  }
+  if (rain > 0.05) {
+    // Rain: curtains slanting with the wind from each cloud (or across the sky when it's all grey)…
+    const amount = clamp(rain / 2, 0.15, 1);
+    const slant = clamp(ex * (0.12 + wN * 0.8), -0.6, 0.6), len = S * 0.016;
+    const shafts = clouds.length ? clouds : [0.22, 0.5, 0.78].map((f) => ({ x0: mx + fw * (f - 0.11), x1: mx + fw * (f + 0.11), y: sky.y0 + skyH * 0.6 }));
+    const per = Math.round(amount * (o.print ? 12 : 30));
+    shafts.forEach((sh, si) => {
+      const depth = Math.max(1, horizon - sh.y);
+      for (let k = 0; k < per; k++) {
+        const dy = (hash(k, 52 + si, seed) * depth + (o.print ? 0 : t * S * 0.4)) % depth;
+        const x = sh.x0 + (sh.x1 - sh.x0) * hash(k, 53 + si, seed) + slant * dy;
+        add([x, sh.y + dy, x + slant * len, sh.y + dy + len], ink.a * (1 - 0.55 * dy / depth), ink.w * 0.8);
+      }
+    });
+    // …and rings opening on the water where it lands.
+    const n = Math.round(amount * (o.print ? 14 : 36));
+    for (let k = 0; k < n; k++) {
+      const sd = 0.04 + 0.9 * hash(k, 61, seed), x = mx + fw * (0.03 + 0.94 * hash(k, 62, seed));
+      const phase = o.print ? 0.6 : (t * 0.7 + hash(k, 63, seed)) % 1;
+      const rx = S * (0.003 + 0.013 * sd) * (0.35 + 0.65 * phase), ry = rx * 0.3, y = waterY(sd, x);
+      const pts = [];
+      for (let q = 0; q <= 16; q++) { const a = (q / 16) * TAU; pts.push(x + rx * Math.cos(a), y + ry * Math.sin(a)); }
+      add(pts, ink.a * (o.print ? 1 : 1.4 * (1 - phase)), ink.w * 0.8, ripples);
     }
   }
 
   const circles = [];
   const shapes = [];
+  const marks = []; // drawn over the filled shapes: rigging and hulls
   if (sunMark && sunMark.y > H * 0.08) {
     circles.push({ x: sunMark.x, y: sunMark.y, r: sunMark.r, fill: dark, alpha: 0.9, accent: 'sun' });
   }
@@ -318,24 +467,41 @@ export function compose(c, o = {}) {
     shapes.push({ pts: moonShape(moonMark.x, moonMark.y, moonMark.r, moonMark.phase), alpha: 0.95, accent: 'moon' });
   }
 
-  // Visitors: one star each, placed deterministically in the sky by id. Regulars burn a little
-  // brighter; guests who are here right now sparkle and carry their name.
-  // Heroes are the stars being welcomed (several when people arrive together), each with its own entrance.
+  // ── Guests ────────────────────────────────────────────────────────────────────
+  // By night each guest is a star, always in the same place: regulars burn a little brighter and
+  // guests who are here sparkle. By day the sun hides the stars (as in life) and guests who are here
+  // are sails on the bay instead, heeling with the real wind. At dusk the sails go in as the stars
+  // come out. Heroes are the guests being welcomed (several when people arrive together).
+  const alt = sun.altitude;
+  const sailsA = o.print ? (alt > -1 ? 1 : 0) : clamp((alt + 1.5) / 4.5, 0, 1);
+  const starsA = o.print ? (alt > -1 ? 0 : 1) : clamp((-1 - alt) / 5, 0, 1);
+  const byDay = sailsA > starsA;
   const heroes = new Map((o.heroes ?? (o.hero != null ? [{ id: o.hero, reveal: o.reveal ?? 1 }] : []))
     .map((h) => [h.id, clamp(h.reveal ?? 1, 0, 1)]));
-  const stars = [];
-  const heroAt = []; // where each welcomed star is, even before it appears (screens animate toward it)
+  const stars = [], boats = [];
+  const heroAt = []; // where each welcomed guest is, even before they appear (screens animate toward it)
   for (const v of o.visitors ?? []) {
     const h = hashString(String(v.id));
-    const px = sky.x0 + (sky.x1 - sky.x0) * hash(h, 1, 11);
-    const py = sky.y0 + (sky.y1 - sky.y0) * Math.pow(hash(h, 2, 13), 0.8);
-    if (sunMark && Math.hypot(px - sunMark.x, py - sunMark.y) < sunMark.r * 2.5) continue;
-    if (moonMark && Math.hypot(px - moonMark.x, py - moonMark.y) < moonMark.r * 2.2) continue;
-    const reveal = heroes.get(v.id);
-    const hero = reveal !== undefined;
-    if (hero) heroAt.push({ id: v.id, x: px, y: py });
-    if (hero && reveal < 0.02) continue; // still on its way in
-    stars.push({ x: px, y: py, h, v, hero, reveal: reveal ?? 1, here: !!v.here || hero });
+    const reveal = heroes.get(v.id), hero = reveal !== undefined, here = !!v.here || hero;
+    if (starsA > 0) {
+      const px = sky.x0 + (sky.x1 - sky.x0) * hash(h, 1, 11);
+      const py = sky.y0 + (sky.y1 - sky.y0) * Math.pow(hash(h, 2, 13), 0.8);
+      const hidden = (sunMark && Math.hypot(px - sunMark.x, py - sunMark.y) < sunMark.r * 2.5) || (moonMark && Math.hypot(px - moonMark.x, py - moonMark.y) < moonMark.r * 2.2);
+      if (!hidden) {
+        if (hero && !byDay) heroAt.push({ id: v.id, x: px, y: py, kind: 'star' });
+        if (!(hero && reveal < 0.02)) stars.push({ x: px, y: py, h, v, hero, reveal: reveal ?? 1, here });
+      }
+    }
+    if (sailsA > 0 && here) {
+      const sd = 0.05 + 0.32 * hash(h, 4, 19);
+      let x = mx + fw * (0.06 + 0.88 * hash(h, 3, 17));
+      const size = S * (0.034 + 0.07 * sd) * (hero ? 1.25 : 1);
+      // Make room if another sail is already there.
+      for (const b of boats) if (Math.abs(b.wx - x) < (b.size + size) * 0.62 && Math.abs(b.sd - sd) < 0.12) x = clamp(b.wx + (b.size + size) * 0.7 * (x >= b.wx ? 1 : -1), mx + size, W - mx - size);
+      const wy = waterY(sd, x);
+      if (hero && byDay) heroAt.push({ id: v.id, x, y: wy - size * 0.55, kind: 'sail', water: wy, size });
+      if (!(hero && reveal < 0.02)) boats.push({ wx: x, wy, sd, size, h, v, hero, reveal: reveal ?? 1 });
+    }
   }
 
   // Typography.
@@ -347,9 +513,9 @@ export function compose(c, o = {}) {
   let clearing = null;
   if (wt) {
     // Spanish first, English small beneath, sized to fit whatever the day's horizon. One guest's
-    // welcome sits in the sky beside their star; a group's opens a clearing in the sea instead,
-    // so every arriving star stays in plain view.
-    const inSea = !!o.welcome.group && o.welcome.group.length > 1;
+    // welcome sits in the sky beside their star; at night a group's opens a clearing in the sea
+    // instead, so every arriving star stays in plain view (by day the sky is free for the words).
+    const inSea = !!o.welcome.group && o.welcome.group.length > 1 && !byDay;
     const avail = inSea ? (H * 0.84 - horizon) * 0.8 : horizon - H * 0.1 - S * 0.01;
     let big = clamp(Math.min(S * 0.07, (avail - cap * 2.2) / 2.85), 14, S * 0.07);
     big = Math.min(big, (fw * 0.92) / Math.max(1, [...wt.title].length * 0.62));
@@ -377,7 +543,7 @@ export function compose(c, o = {}) {
   const dots = stars.filter((d) => d.hero || !inBlock(d));
 
   const links = [];
-  if (!o.welcome && !o.print) {
+  if (!o.welcome && !o.print && starsA > 0) {
     const quiet = dots.filter((d) => !d.here); // guests who are here stand apart from the constellation
     for (const a of quiet) {
       let best = null, bd = S * 0.11;
@@ -385,16 +551,17 @@ export function compose(c, o = {}) {
         const dd = Math.hypot(a.x - b.x, a.y - b.y);
         if (b !== a && dd < bd) { bd = dd; best = b; }
       }
-      if (best) links.push({ pts: [a.x, a.y, best.x, best.y], alpha: 0.18, dotted: true });
+      if (best) links.push({ pts: [a.x, a.y, best.x, best.y], alpha: 0.18 * starsA, dotted: true });
     }
   }
 
   const sparks = [];
   const labels = [];
   for (const d of dots) {
+    const A = starsA;
     const regular = 1 + 0.22 * Math.min(4, Math.max(0, (d.v.visits ?? 1) - 1));
     if (!d.here) {
-      circles.push({ x: d.x, y: d.y, r: Math.max(1, S * 0.0022) * regular, fill: true, alpha: o.welcome ? 0.35 : 0.75, accent: 'visitor' });
+      circles.push({ x: d.x, y: d.y, r: Math.max(1, S * 0.0022) * regular, fill: true, alpha: (o.welcome ? 0.35 : 0.75) * A, accent: 'visitor' });
       continue;
     }
     // A four-point sparkle: thicker near the core, hairline at the tips, slow twinkle on screens.
@@ -405,22 +572,66 @@ export function compose(c, o = {}) {
     const thin = o.print ? 1 : 0.8;
     for (const [dx, dy, len] of [[1, 0, 1], [-1, 0, 1], [0, 1, 1], [0, -1, 1], [0.7071, 0.7071, 0.42], [-0.7071, 0.7071, 0.42], [0.7071, -0.7071, 0.42], [-0.7071, -0.7071, 0.42]]) {
       const l = Math.max(d0 * 1.2, L * len);
-      sparks.push({ pts: [d.x + dx * d0, d.y + dy * d0, d.x + dx * (d0 + (l - d0) * 0.45), d.y + dy * (d0 + (l - d0) * 0.45)], alpha: 0.95, weight: len < 1 ? thin : 1.5, accent: 'here' });
-      if (len === 1) sparks.push({ pts: [d.x + dx * d0, d.y + dy * d0, d.x + dx * l, d.y + dy * l], alpha: 0.9, weight: thin, accent: 'here' });
+      sparks.push({ pts: [d.x + dx * d0, d.y + dy * d0, d.x + dx * (d0 + (l - d0) * 0.45), d.y + dy * (d0 + (l - d0) * 0.45)], alpha: 0.95 * A, weight: len < 1 ? thin : 1.5, accent: 'here' });
+      if (len === 1) sparks.push({ pts: [d.x + dx * d0, d.y + dy * d0, d.x + dx * l, d.y + dy * l], alpha: 0.9 * A, weight: thin, accent: 'here' });
     }
-    circles.push({ x: d.x, y: d.y, r: S * (d.hero ? 0.0062 : 0.0045), fill: true, alpha: 1, accent: 'here' });
-    circles.push({ x: d.x, y: d.y, r: S * (d.hero ? 0.017 + 0.004 * Math.sin(t * 0.9) * (o.print ? 0 : 1) : 0.0115), fill: false, alpha: d.hero ? 0.55 : 0.4, accent: 'here' });
-    if (d.v.name && !o.welcome) labels.push(d); // during a welcome, the arrivals have the stage
+    circles.push({ x: d.x, y: d.y, r: S * (d.hero ? 0.0062 : 0.0045), fill: true, alpha: A, accent: 'here' });
+    circles.push({ x: d.x, y: d.y, r: S * (d.hero ? 0.017 + 0.004 * Math.sin(t * 0.9) * (o.print ? 0 : 1) : 0.0115), fill: false, alpha: (d.hero ? 0.55 : 0.4) * A, accent: 'here' });
+    if (d.v.name && !o.welcome && !byDay) labels.push(d); // during a welcome, the arrivals have the stage
   }
 
-  // Names float around their stars: each curves along a small circle and sways at its own pace
-  // (its own speed, direction and starting point, new every day). Kept clear of the words, the sun
-  // and moon, other stars and each other; on e-ink they sit still where they fit best.
+  // Sails: a gold mainsail, a paper jib, mast and hull, heeling with the wind and rocking a little
+  // on the swell. A guest being welcomed by day glides in and hoists their sail.
+  for (const b of boats) {
+    const A = sailsA, z = b.size;
+    const grow = b.hero ? 1 - Math.pow(1 - b.reveal, 3) : 1;
+    const ang = clamp(wN * 0.22, 0, 0.3) * wdir + (o.print ? 0 : Math.sin(t * 0.9 + (b.h % 97)) * 0.035);
+    const cs = Math.cos(ang), sn = Math.sin(ang);
+    const X = b.wx - (b.hero ? (1 - grow) * wdir * S * 0.04 : 0), Y = b.wy;
+    const P = (dx, dy) => [X + dx * cs - dy * sn, Y + dx * sn + dy * cs];
+    const boom = -0.13 * z, head = boom - 0.88 * z * grow;
+    shapes.push({ pts: [...P(-0.56 * z, -0.13 * z), ...P(0.6 * z, -0.13 * z), ...P(0.44 * z, 0.02 * z), ...P(-0.46 * z, 0.02 * z)], alpha: A, accent: 'bg' });
+    const main = [...P(0.02 * z * wdir, head), ...P(0.02 * z * wdir, boom)];
+    for (let q = 0; q <= 8; q++) {
+      const u = q / 8;
+      main.push(...P((0.5 * (1 - u) + 0.02 * u + 0.07 * Math.sin(Math.PI * u)) * z * wdir, boom + (head - boom) * u));
+    }
+    shapes.push({ pts: main, alpha: A, accent: 'here' });
+    const jib = [...P(-0.02 * z * wdir, boom - 0.74 * z * grow), ...P(-0.42 * z * wdir, boom), ...P(-0.03 * z * wdir, boom)];
+    shapes.push({ pts: jib, alpha: A, accent: 'bg' });
+    marks.push({ pts: [...jib, jib[0], jib[1]], alpha: 0.9 * A, weight: 0.9, accent: 'here' });
+    marks.push({ pts: [...P(0, 0.02 * z), ...P(0, head - 0.06 * z * grow)], alpha: A, weight: 1.1, accent: 'here' });
+    marks.push({ pts: [...P(-0.56 * z, -0.09 * z), ...P(-0.46 * z, 0), ...P(0.44 * z, 0), ...P(0.6 * z, -0.11 * z)], alpha: A, weight: 1.4, accent: 'here' });
+    marks.push({ pts: [X - 0.36 * z, Y + 0.12 * z, X + 0.3 * z, Y + 0.12 * z], alpha: 0.5 * A, weight: 0.8, accent: 'here' });
+    marks.push({ pts: [X - 0.2 * z, Y + 0.24 * z, X + 0.14 * z, Y + 0.24 * z], alpha: 0.3 * A, weight: 0.8, accent: 'here' });
+    if (b.v.name && !o.welcome && byDay) labels.push({ x: X, y: Y - z * 0.55, h: b.h, v: b.v, r0: z * 0.72 + cap * 0.3, sail: true });
+  }
+
+  // Gulls by day, a few, gliding across with the wind (none in rain or under a grey sky).
+  const gulls = [];
+  if (sailsA > 0.01 && rain <= 0.05 && cover < 0.85) {
+    const n = 2 + Math.floor(hash(ed.day, 71, 3) * 3);
+    for (let k = 0; k < n; k++) {
+      const w = S * (0.007 + 0.006 * hash(k, 72, seed));
+      const x = mx + ((((hash(k, 73, seed) * fw + (o.print ? 0 : t * S * (0.004 + 0.004 * hash(k, 74, seed)) * wdir)) % fw) + fw) % fw);
+      const y = sky.y0 + skyH * (0.1 + 0.75 * hash(k, 75, seed)) + (o.print ? 0 : Math.sin(t * 0.4 + k) * S * 0.006);
+      if ((sunMark && Math.hypot(x - sunMark.x, y - sunMark.y) < sunMark.r * 3) || inBlock({ x, y })) continue;
+      const flap = o.print ? 0 : 0.22 * Math.sin(t * (1.1 + hash(k, 76, seed)) + k * 2);
+      const wing = (sg) => { const out = []; for (let q = 0; q <= 6; q++) { const u = q / 6; out.push([x + sg * w * u, y - w * (0.5 * Math.sin(Math.PI * Math.min(1, u * 1.1)) + flap * u)]); } return out; };
+      gulls.push({ pts: [...wing(-1).reverse(), ...wing(1).slice(1)].flat(), alpha: (o.print ? 1 : 0.75) * sailsA, weight: o.print ? 1.1 : 0.95 });
+    }
+  }
+
+  // Names float around their stars (and over their sails): each curves along a small circle and sways
+  // at its own pace (its own speed, direction and starting point, new every day). Kept clear of the
+  // words, the sun and moon, other guests and each other; on e-ink they sit still where they fit best.
   const box = (x, y, r, owner) => ({ x0: x - r, x1: x + r, y0: y - r, y1: y + r, owner });
   const placed = block ? [block] : [];
+  if (o.captions !== false) placed.push({ x0: 0, x1: W, y0: 0, y1: H * 0.075 + cap * (W < H * 1.3 ? 2.6 : 0.8) }); // the title and edition
   if (sunMark) placed.push(box(sunMark.x, sunMark.y, sunMark.r * 1.6));
   if (moonMark) placed.push(box(moonMark.x, moonMark.y, moonMark.r * 1.5));
-  for (const d of dots) placed.push(box(d.x, d.y, S * (d.hero ? 0.05 : d.here ? 0.026 : 0.007), d));
+  if (!byDay) for (const d of dots) placed.push(box(d.x, d.y, S * (d.hero ? 0.05 : d.here ? 0.026 : 0.007), d));
+  for (const d of labels) if (d.sail) placed.push(box(d.x, d.y, d.r0 * 0.75, d));
   const arcBox = (x, y, r, a, span, size) => {
     let x0 = Infinity, x1 = -Infinity, y0 = Infinity, y1 = -Infinity;
     for (let k = 0; k <= 6; k++) {
@@ -435,22 +646,22 @@ export function compose(c, o = {}) {
   for (const d of labels) {
     const hit = (b) => placed.some((p) => p.owner !== d && b.x0 < p.x1 && b.x1 > p.x0 && b.y0 < p.y1 && b.y1 > p.y0);
     const size = cap * 0.95, w = textW(d.v.name, size);
-    const u = (k) => hash(d.h, k, ed.day + 401); // this star's own motion, new every day
-    const r0 = S * (0.03 + 0.008 * u(1));
+    const u = (k) => hash(d.h, k, ed.day + 401); // this guest's own motion, new every day
+    const r0 = d.r0 ?? S * (0.03 + 0.008 * u(1));
     const span = Math.min(Math.PI * 1.2, w / r0);
-    const start = -Math.PI / 2 + (u(2) - 0.5) * 0.5;
-    const tries = [0, -0.45, 0.45, -0.8, 0.8, Math.PI, Math.PI - 0.45, Math.PI + 0.45].map((da) => start + da); // over or under, never the sides
+    const start = -Math.PI / 2 + (u(2) - 0.5) * (d.sail ? 0.3 : 0.5);
+    const tries = (d.sail ? [0, -0.35, 0.35] : [0, -0.45, 0.45, -0.8, 0.8, Math.PI, Math.PI - 0.45, Math.PI + 0.45]).map((da) => start + da); // over or under, never the sides
     const a0 = tries.find((a) => { const b = arcBox(d.x, d.y, r0, a, span, size); return b.x0 > mx * 0.5 && b.x1 < W - mx * 0.5 && !hit(b); });
     if (a0 === undefined) continue;
     placed.push(arcBox(d.x, d.y, r0, a0, span, size));
-    const sway = o.print ? 0 : 0.3 * Math.sin(t * (0.05 + 0.07 * u(3)) * (u(4) < 0.5 ? -1 : 1) + u(5) * TAU);
+    const sway = o.print ? 0 : (d.sail ? 0.12 : 0.3) * Math.sin(t * (0.05 + 0.07 * u(3)) * (u(4) < 0.5 ? -1 : 1) + u(5) * TAU);
     const a = a0 + sway;
     texts.push({ text: d.v.name, arc: { x: d.x, y: d.y, r: r0, a }, size, italic: true, alpha: 0.95, accent: 'here', role: 'label' });
     if (!o.print) texts.push({ text: 'aquí · here', arc: { x: d.x, y: d.y, r: r0 + size * 1.35, a }, size: size * 0.58, alpha: 0.55, accent: 'here', role: 'label-sub' });
   }
 
   // Reflections: a column of glints on the water straight below a light, spreading toward the
-  // viewer. The welcomed star's is drawn in as it arrives; the moon's follows its brightness.
+  // viewer. A welcomed star's is drawn in as it arrives; the moon's follows its brightness.
   const shimmer = o.print ? 0 : Math.floor(t * 2.5);
   const column = (x, reach, strength, accent, salt) => {
     const out = [];
@@ -468,7 +679,7 @@ export function compose(c, o = {}) {
   };
   const glints = [];
   if (moonMark && dark && moonMark.fraction > 0.2) glints.push(...column(moonMark.x, 1, 0.35 + 0.65 * moonMark.fraction, 'moon', 20));
-  for (const d of dots.filter((x) => x.hero).slice(0, 3)) glints.push(...column(d.x, d.reveal, 1, 'here', hashString(String(d.v.id)) % 97));
+  if (!byDay) for (const d of dots.filter((x) => x.hero).slice(0, 3)) glints.push(...column(d.x, d.reveal, starsA, 'here', hashString(String(d.v.id)) % 97));
 
   if (o.captions !== false) {
     const portrait = W < H * 1.3;
@@ -495,12 +706,12 @@ export function compose(c, o = {}) {
   }
 
   // The clearing: the sea parts around a group's welcome.
-  const sea = clearing ? cutOut([...lines, ...glints], clearing) : [...lines, ...glints];
+  const sea = clearing ? cutOut([...lines, ...glints, ...ripples], clearing) : [...lines, ...glints, ...ripples];
 
   return {
     width: W, height: H, dark, horizon, edition: { n: ed.n, style, label: ed.label, palette: ed.palette.name },
     palette: { ...pal, visitor: pal.fg, sun: pal.fg, moon: pal.fg },
-    lines: [...weather, ...links, ...sea, ...sparks], shapes, circles, texts,
+    lines: [...weather, ...gulls, ...links, ...sea, ...sparks], shapes, marks, circles, texts, byDay,
     hero: heroAt[0] ?? null, heroes: heroAt,
     sun: sunMark && { x: sunMark.x, y: sunMark.y, r: sunMark.r },
     moon: moonMark && { x: moonMark.x, y: moonMark.y, r: moonMark.r },
@@ -597,6 +808,9 @@ export function toSVG(comp) {
   }
   out.push('</g>');
   for (const sh of comp.shapes ?? []) out.push(`<path d="${pathOf(sh.pts)}Z" fill="${col(sh.accent)}" opacity="${sh.alpha}"/>`);
+  out.push(`<g fill="none" stroke-linecap="round" stroke-linejoin="round">`);
+  for (const l of comp.marks ?? []) out.push(`<path d="${pathOf(l.pts)}" stroke="${col(l.accent)}" stroke-width="${(sw * (l.weight ?? 1)).toFixed(2)}" opacity="${l.alpha.toFixed(2)}"/>`);
+  out.push('</g>');
   for (const c of comp.circles) {
     out.push(`<circle cx="${c.x.toFixed(1)}" cy="${c.y.toFixed(1)}" r="${c.r.toFixed(1)}" opacity="${c.alpha}" ${c.fill ? `fill="${col(c.accent)}"` : `fill="none" stroke="${col(c.accent)}" stroke-width="${sw}"`}/>`);
   }

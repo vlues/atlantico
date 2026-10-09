@@ -9,6 +9,7 @@ import { rasterize, encodePNG, packRaw } from '../web/lib/raster.js';
 import { sunPosition, sunTimes } from '../web/lib/sun.js';
 
 const calm = { waveHeight: 0.3, wavePeriod: 6, waveDirection: 270, windSpeed: 4, windDirection: 200, tide: 0, sun: { altitude: 20, azimuth: 220 } };
+globalThis.calmNight = { ...calm, sun: { altitude: -20, azimuth: 300 } };
 const levante = { ...calm, waveHeight: 0.9, wavePeriod: 4, waveDirection: 95, windSpeed: 55, windDirection: 90 };
 
 test('composition is deterministic', () => {
@@ -18,6 +19,7 @@ test('composition is deterministic', () => {
 });
 
 test('visitor dots are placed by id, not by order', () => {
+  const calm = { ...globalThis.calmNight };
   const one = compose(calm, { visitors: [{ id: 'ana' }, { id: 'tom' }] }).circles.filter((c) => c.accent === 'visitor');
   const two = compose(calm, { visitors: [{ id: 'tom' }, { id: 'ana' }] }).circles.filter((c) => c.accent === 'visitor');
   assert.deepEqual(new Set(one.map((c) => `${c.x},${c.y}`)), new Set(two.map((c) => `${c.x},${c.y}`)));
@@ -210,4 +212,28 @@ test('names float around their stars, each in its own way, and still on e-ink', 
   assert.ok(Math.abs(a1[0].arc.a - a2[0].arc.a) > 0.01, 'they sway over time');
   assert.notEqual((a2[0].arc.a - a1[0].arc.a).toFixed(3), (a2[1].arc.a - a1[1].arc.a).toFixed(3), 'each at its own pace');
   assert.deepEqual(at(0, true).map((t) => t.arc.a), at(99, true).map((t) => t.arc.a), 'still on e-ink');
+});
+
+test('by day guests who are here are sails on the bay; by night, stars; the rest hide in daylight', () => {
+  const visitors = [{ id: 'ana', here: true, name: 'Ana' }, { id: 'tom' }];
+  const day = composeAny({ ...calm, sun: { altitude: 30, azimuth: 200 } }, { width: 800, height: 480, style: 'lineas', visitors });
+  assert.equal(day.byDay, true);
+  assert.ok(day.shapes.some((sh) => sh.accent === 'here'), 'a gold sail');
+  assert.ok(day.marks.length >= 4, 'mast, jib and hull');
+  assert.ok(!day.circles.some((c) => c.accent === 'visitor' || c.accent === 'here'), 'no stars by day');
+  assert.deepEqual(day.texts.filter((t) => t.role === 'label').map((t) => t.text), ['Ana']);
+  const nightComp = composeAny({ ...calm, sun: { altitude: -20, azimuth: 300 } }, { width: 800, height: 480, style: 'lineas', visitors });
+  assert.equal(nightComp.byDay, false);
+  assert.ok(nightComp.circles.some((c) => c.accent === 'visitor'));
+  assert.ok(!nightComp.shapes.some((sh) => sh.accent === 'here'));
+  // A daytime welcome arrives by sail, and the e-ink version draws it too.
+  const w = composeAny({ ...calm, sun: { altitude: 30, azimuth: 200 } }, { width: 800, height: 480, print: true, visitors, hero: 'ana', welcome: { id: 'ana', name: 'Ana', visits: 1 } });
+  assert.equal(w.heroes[0].kind, 'sail');
+  assert.ok(new Set(rasterize(w, 6).px).has(4), 'the sail in the accent ink');
+});
+
+test('weather: cloud kinds follow cover; rain falls from clouds and rings the water', () => {
+  const at = (cloudCover, precipitation = 0) => composeAny({ ...calm, cloudCover, precipitation }, { width: 800, height: 480, style: 'lineas' }).lines.length;
+  const clear = at(0), wisps = at(20), cumulus = at(60), grey = at(95), wet = at(95, 3);
+  assert.ok(clear < wisps && wisps < cumulus && cumulus < grey && grey < wet, `${clear} ${wisps} ${cumulus} ${grey} ${wet}`);
 });
