@@ -228,9 +228,19 @@ Change the night setting and OLED care per screen in **Devices**; the screen pic
 - Keep any load well under the rating.
 - Floor easels: stand them against a wall, out of the way, and skip anti-tip straps that need a screw.
 
+**Your own TV (no new screen): a Raspberry Pi on a spare HDMI input.** Atlántico becomes what the TV rests on, and the TV stays your TV:
+- Any button on the remote goes straight back to TV and apps. (Buttons that reach the Pi over HDMI-CEC hand the screen back at once; Home, Input and app buttons never reach it.)
+- When you finish watching (switched off from a programme, by hand or by the TV's own no-button timer), Atlántico comes back instead of a black screen, if someone is staying and it isn't night. Switched off while Atlántico is showing, the TV stays off.
+- A guest walks in: the TV wakes for the welcome only if it's off, never over a film. **Show it on the TV** on the guest page or in Control wakes it whenever you like.
+- Nobody staying for 20 minutes, or 00:30–08:00: the Pi's picture goes off, so a TV left on Atlántico sleeps by itself; a TV showing anything else is never touched.
+- The wall keeps following arrivals and departures while the TV shows something else, and when it comes back it plays the welcomes you missed and names who left.
+- The Pi can't see what the TV's own apps are playing (no TV says so over HDMI), so "idle" is the TV's own: being switched off from a programme, by hand or by its timer.
+- **Lamps that follow the picture** (optional): Govee lights with **LAN Control** on (TV light bars, floor and table lamps; ordinary Govee bulbs can't change fast enough), each placed in **Control → Light** as left, right, behind the TV or whole room. On Atlántico, from dusk, they follow the wall and its surprises, near the room's own brightness. While you watch they follow the film side by side (an explosion on the left lights the left lamp) from a **Raspberry Pi Camera Module 3** facing the screen; it finds the screen by itself the first time Atlántico is on. Meanwhile the other lamps settle to a low warm glow, and everything returns when Atlántico does. The tour and any scene you pick by hand take the lamps back.
+- Set up: paste `curl -fsSL https://vlues.github.io/atlantico/kiosk.sh | bash -s -- shared` in the Pi's Terminal. It shows a 4-digit code (and a QR) to type on **Add device → Screen**, installs `tv-agent.py` and a small root service that listens to HDMI-CEC, and asks to reboot. On the TV turn on HDMI-CEC and "No signal" power off. Logs: `~/.cache/atlantico-tv.log`.
+
 **A Raspberry Pi behind a TV (the dedicated screen):**
 1. Put Raspberry Pi OS (with desktop) on a microSD card with **Raspberry Pi Imager**, setting your Wi-Fi and a user there.
-2. Plug the Pi into the TV, open Terminal on it, and paste the line shown on **Add device → Screen**: `curl -fsSL https://vlues.github.io/atlantico/kiosk.sh | bash`.
+2. Plug the Pi into the TV, open Terminal on it, and paste the line shown on **Add device → Screen**: `curl -fsSL https://vlues.github.io/atlantico/kiosk.sh | bash -s -- art`.
 3. It sets up the following, then reboots:
    - automatic login;
    - the wall full screen with sound, restarted by itself if it ever closes;

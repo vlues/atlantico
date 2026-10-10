@@ -40,6 +40,7 @@ export interface WallState {
   dark: boolean;
   visitors: Star[];
   welcome: Welcome | null;
+  tv: boolean;            // a household TV with the wall on one of its inputs (see tv.ts)
   lat: number; lon: number;
 }
 
@@ -63,10 +64,13 @@ export const SUN_PRESETS: Record<string, { altitude: number; azimuth: number }> 
 export async function wallState(env: Env, scenario?: string | null): Promise<WallState> {
   const lat = Number(env.LAT), lon = Number(env.LON);
   const t = Date.now();
-  const [set, rows] = await Promise.all([
+  const [set, rows, tv] = await Promise.all([
     settings(env, ['demo:scenario', 'demo:sun', 'demo:style', 'demo:day', 'scene', 'welcome', 'tour', 'farewell', 'music:now', 'surprise']),
     env.DB.prepare('SELECT id, first_name, visits, last_seen, left_at FROM visitors ORDER BY created_at').all<any>()
       .then((r) => r.results).catch(() => []),
+    // A household TV (shared with films and series) has checked in lately: guests can ask for the wall on it.
+    env.DB.prepare("SELECT COUNT(*) AS n FROM devices WHERE type = 'screen' AND json_extract(config, '$.kind') = 'shared' AND last_seen > ?")
+      .bind(t - 20 * 60000).first<{ n: number }>().then((r) => (r?.n ?? 0) > 0).catch(() => false),
   ]);
   const demoScenario: string | null = set['demo:scenario'] ?? null, sunOverride: string | null = set['demo:sun'] ?? null;
   const style: string | null = set['demo:style'] ?? null, dayAhead = set['demo:day'], scene: string | null = set.scene ?? null;
@@ -106,7 +110,7 @@ export async function wallState(env: Env, scenario?: string | null): Promise<Wal
     music: set['music:now'] ?? null,
     surprise: set.surprise && set.surprise.until > t ? set.surprise : null,
     sunOverride: sunOverride && SUN_PRESETS[sunOverride] ? sunOverride : null,
-    scene: s, lat, lon, visitors, welcome: active,
+    scene: s, lat, lon, visitors, welcome: active, tv,
     // The wall follows the real sky: paper by day, night after sunset (whatever the lights do).
     dark: sun.altitude < -2,
   };

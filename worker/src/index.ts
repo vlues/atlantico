@@ -4,7 +4,7 @@ import { requireOwner, signIn, sessionHash, SESSION_MS, body, setSetting, getSet
 import { wallState, wallVersion, panelImage, panelPoll, liveSVG, liveHTML, bumpWall, SUN_PRESETS } from './wall';
 import { SCENARIOS } from './weather';
 import { arrive, demoArrive, deleteVisitor, endVisit, listVisitors, guestInfo, cleanName, lastOneOut, type WifiSettings } from './guests';
-import { applyScene, saveGovee, SCENES, autoState, adapterFor, spotlight, ZONES, type Zone } from './lights';
+import { applyScene, saveGovee, SCENES, autoState, adapterFor, spotlight, ZONES, TV_SIDES, tvLink, type Zone, type TvSide } from './lights';
 import { plantStatus, listPlants, ensureSeeded, simulatorTick, fastForward, recordReading, type Rules } from './plants';
 import { createPairing, pairingStatus, pair, report, listDevices, updateDevice, removeDevice, offlineAlerts } from './devices';
 import { dailyCheck, telegram } from './check';
@@ -13,6 +13,7 @@ import { tourInfo, tourStop, playStop, STOPS } from './tour';
 import * as music from './music';
 import * as screens from './screens';
 import * as surprises from './surprises';
+import { tvState, tvReport, showOnTv, saveTvSides } from './tv';
 // @ts-ignore — shared plain-JS module
 import { edition, STYLES } from '../../web/lib/art.js';
 // @ts-ignore
@@ -76,6 +77,9 @@ on('POST', '/api/music/queue', (r, env, ctx) => music.queue(r, env, ctx));
 on('GET', '/api/music/callback', (r, env, _c, _m, url) => music.callback(r, env, url));
 on('GET', '/api/tour', (_r, env) => tourInfo(env));
 on('POST', '/api/tour', (r, env, ctx) => tourStop(r, env, ctx));
+on('GET', '/api/tv', (r, env) => tvState(r, env));         // the Pi on the household TV (its screen key)
+on('POST', '/api/tv/state', (r, env, ctx) => tvReport(r, env, ctx));
+on('POST', '/api/tv/show', (r, env) => showOnTv(r, env)); // the owner, or a guest who is here
 on('GET', '/art/live', (_r, env, _c, _m, url) => liveHTML(url, env));
 on('GET', '/art/live.svg', (_r, env, _c, _m, url) => liveSVG(url, env));
 on('GET', '/art/panel.png', (r, env, _c, _m, url) => panelImage(r, url, env, 'png'));
@@ -159,6 +163,7 @@ on('PUT', '/api/lights/zones', async (r, env) => {
   await setSetting(env, 'light:zones', zones);
   return json({ ok: true, zones });
 }, 'owner');
+on('PUT', '/api/lights/tvside', (r, env) => saveTvSides(r, env), 'owner');
 on('DELETE', '/api/lights/govee', async (_r, env) => {
   await env.DB.batch([
     env.DB.prepare("DELETE FROM settings WHERE key = 'govee'"),
@@ -208,7 +213,7 @@ async function route(req: Request, url: URL, env: Env, ctx: ExecutionContext): P
 
 async function overview(env: Env) {
   await ensureSeeded(env);
-  const [wall, plants, devices, alerts, visitors, lightsLast, checkLast, demoScenario, wifi, greeting, govee, lamps] = await Promise.all([
+  const [wall, plants, devices, alerts, visitors, lightsLast, checkLast, demoScenario, wifi, greeting, govee, lamps, tvSides, tv] = await Promise.all([
     wallState(env), plantStatus(env), listDevices(env),
     env.DB.prepare('SELECT * FROM alerts ORDER BY ts DESC LIMIT 60').all().then((r) => r.results),
     listVisitors(env),
@@ -217,6 +222,8 @@ async function overview(env: Env) {
     getSetting<WifiSettings | null>(env, 'wifi', null), getSetting(env, 'greeting', 'Bienvenido'),
     getSetting<any>(env, 'govee', null),
     adapterFor(env),
+    getSetting<Record<string, TvSide>>(env, 'light:tvside', {}),
+    tvLink(env),
   ]);
   const today = edition(wall.editionDate, wall.style);
   const coming = Array.from({ length: 8 }, (_, d) => { const e = edition(Date.now() + d * 86400000); return { day: d, n: e.n, style: e.style, palette: e.palette.name, label: e.label }; });
@@ -225,7 +232,9 @@ async function overview(env: Env) {
     scenes: Object.entries(SCENES).map(([id, s]) => ({ id, label: s.label })),
     autoState: autoState(env),
     lights: lightsLast,
-    bulbs: lamps.bulbs.map((b) => ({ id: b.id, name: b.name, zone: b.zone })),
+    bulbs: lamps.bulbs.map((b) => ({ id: b.id, name: b.name, zone: b.zone, tvSide: tvSides[b.id] ?? 'none' })),
+    tvSides: TV_SIDES,
+    tv, // the household TV's agent, when it has reported in the last minute and a half
     music: await music.musicStatus(env),
     zones: ZONES,
     plants, devices, alerts, visitors,

@@ -27,7 +27,7 @@ test('visitor dots are placed by id, not by order', () => {
 
 test('levante bends the lines more than a calm day', () => {
   const spread = (c) => {
-    const l = compose(c, { width: 800, height: 480, print: true }).lines.at(-5).pts;
+    const l = compose(c, { width: 800, height: 480, print: true, date: Date.UTC(2026, 9, 9, 12) }).lines.at(-5).pts; // one day's horizon, not today's
     const ys = l.filter((_, i) => i % 2);
     return Math.max(...ys) - Math.min(...ys);
   };

@@ -20,6 +20,13 @@ let state = null;
 let version = null;
 let shown = { key: null };
 let visit = null; // the welcome being played: { start, until, w, starts: Map(id → when its star's entrance began) }
+// On the household TV (kiosk.sh shared) the Pi may have just woken the TV for this arrival: give
+// the TV a few seconds to come on before the shooting star, so the guest sees all of it.
+const TV = params.has('tv');
+const TV_WAKE = TV ? 6000 : 0;
+let away = null;   // since when the TV has shown something else, and who was here then
+let missed = null; // who left meanwhile, named once on the way back
+let calib = null;  // the marks the Pi's camera uses to find the screen
 let stop = null;  // the tour stop being shown: { key, start, until, tour }
 let note = null;  // a brief line on the wall ("sonido") after a tap
 // Guests who were here at the last look, and those leaving now: their exit plays for 8 seconds, then
@@ -131,14 +138,16 @@ function draw() {
   const w = state.welcome;
   if (w && w.until > t) {
     const members = w.group ?? [w];
-    if (!visit || t >= visit.until || !members.some((m) => visit.starts.has(m.id))) visit = { start: t, until: 0, starts: new Map() };
+    const fresh = !visit || t >= visit.until || !members.some((m) => visit.starts.has(m.id));
+    if (fresh) visit = { start: t + TV_WAKE, until: 0, starts: new Map() };
+    const from = Math.max(t, visit.start);
     let added = 0;
-    for (const m of members) if (!visit.starts.has(m.id)) visit.starts.set(m.id, t + 900 * added++);
-    if (added) { visit.until = Math.max(visit.until, t + 22000); arrivalSound(); }
+    for (const m of members) if (!visit.starts.has(m.id)) visit.starts.set(m.id, from + 900 * added++);
+    if (added) { visit.until = Math.max(visit.until, from + 22000); setTimeout(arrivalSound, from - t); }
     visit.until = Math.max(visit.until, w.until);
     visit.w = w;
   }
-  const playing = visit && t < visit.until ? visit : null;
+  const playing = visit && t >= visit.start && t < visit.until ? visit : null;
   const welcome = playing?.w ?? null;
   const e = playing ? (t - playing.start) / 1000 : null;
 
@@ -200,6 +209,12 @@ function draw() {
   const dim = display.night(t, !!(playing || touring || singing != null || surprising || (fw && fw.until > t)));
   if (dim > 0) { ctx.save(); ctx.globalAlpha = dim; ctx.fillStyle = '#000'; ctx.fillRect(0, 0, canvas.width, canvas.height); ctx.restore(); }
   display.shift(t);
+  if (missed && t >= missed.start && !playing) {
+    const me = (t - missed.start) / 1000;
+    if (me > 6) missed = null;
+    else band(ctx, comp, missed.es, missed.en, Math.min(1, me / 1.2) * Math.min(1, (6 - me) / 1.2));
+  }
+  if (calib) calibration(t);
   if (note && t < note.until) {
     ctx.save();
     ctx.globalAlpha = Math.min(1, (note.until - t) / 600);
@@ -209,6 +224,49 @@ function draw() {
     ctx.fillText(note.text, canvas.width / 2, canvas.height * 0.94);
     ctx.restore();
   }
+}
+
+// ── The household TV ────────────────────────────────────────────────────────────────────────
+// The Pi's agent (tv-agent.py) presses F14 when the TV leaves Atlántico and F13 when it comes
+// back: whoever arrived meanwhile gets the welcome they missed, and whoever left is named once.
+// F15 shows the marks its camera finds the screen by. Any other key is the TV remote reaching the
+// wall after the agent handed the screen back: if the TV is still here, say where TV and apps are.
+if (TV) addEventListener('keydown', (e) => {
+  const t = Date.now();
+  if (e.key === 'F14') { if (!away) away = { since: t, here: new Map((state?.visitors ?? []).filter((v) => v.here).map((v) => [v.id, v])) }; }
+  else if (e.key === 'F13') { if (away && t - away.since > 15000) catchUp(away, t); away = null; }
+  else if (e.key === 'F15') calib = { start: t };
+  else note = { text: 'tele y apps: botón Home · TV & apps: press Home', until: t + 5000 };
+});
+
+function catchUp(gone, t) {
+  const hereNow = (state?.visitors ?? []).filter((v) => v.here);
+  const came = hereNow.filter((v) => !gone.here.has(v.id)).slice(0, 12);
+  const left = [...gone.here.values()].filter((v) => v.name && !hereNow.some((x) => x.id === v.id)).map((v) => v.name);
+  const list = (names, and) => (names.length > 1 ? `${names.slice(0, -1).join(', ')} ${and} ${names[names.length - 1]}` : names[0]);
+  if (came.length) {
+    const first = came[0], group = came.map((v) => ({ id: v.id, name: v.name, visits: v.visits }));
+    const greeting = came.length > 1 ? 'Bienvenidos' : first.visits > 1 ? 'Hola de nuevo' : 'Bienvenido';
+    const w = { id: first.id, name: first.name, greeting, visits: first.visits, since: null, at: t, until: t + 22800, ...(came.length > 1 ? { group } : {}) };
+    visit = { start: t + 800, until: t + 22800, w, starts: new Map(group.map((g, i) => [g.id, t + 800 + 900 * i])) };
+    setTimeout(arrivalSound, 800);
+  }
+  if (left.length) missed = { es: `${list(left, 'y')} ${left.length > 1 ? 'se fueron' : 'se fue'}`, en: `${list(left, 'and')} left`, start: t + (came.length ? 23500 : 1000) };
+}
+
+// Black with a white square near each corner, then all black, then all white (the camera measures
+// the screen's corners, its black and its white). The agent times its pictures to these steps.
+function calibration(t) {
+  const ce = t - calib.start, W = canvas.width, H = canvas.height, s = Math.min(W, H) * 0.08;
+  if (ce > 6500) { calib = null; return; }
+  ctx.save();
+  ctx.fillStyle = ce < 4500 ? '#000' : '#fff';
+  ctx.fillRect(0, 0, W, H);
+  if (ce < 2500) {
+    ctx.fillStyle = '#fff';
+    for (const [x, y] of [[0.1, 0.1], [0.9, 0.1], [0.9, 0.9], [0.1, 0.9]]) ctx.fillRect(x * W - s / 2, y * H - s / 2, s, s);
+  }
+  ctx.restore();
 }
 
 // A wall runs for months: when a new version of the site is published, pick it up.

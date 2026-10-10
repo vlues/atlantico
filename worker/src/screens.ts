@@ -1,6 +1,7 @@
 // Screens: any TV, tablet or monitor showing the live wall. A new screen shows a 4-digit code
 // (and a QR for the owner's phone); the owner types or scans it on Add device, and the screen
-// becomes a device with its own settings (night dimming, OLED care) and online status.
+// becomes a device with its own settings (night dimming, OLED care) and online status. A Pi set up
+// for the household TV (kiosk.sh shared) says so when it asks for its code, and is added as 'shared'.
 import type { Env } from './env';
 import { json } from './http';
 import { now, randomId, sha256, body, rateLimit, deviceFromRequest, logAlert } from './util';
@@ -15,11 +16,12 @@ export async function hello(req: Request, env: Env) {
   const ip = req.headers.get('cf-connecting-ip') ?? 'local';
   if (!(await rateLimit(env, `screen:${ip}`, 12, 3600))) return json({ error: 'later' }, 429);
   const claim = randomId(16);
+  const tv = !!(await body<{ tv?: boolean }>(req)).tv;
   for (let i = 0; i < 8; i++) {
     const code = String(1000 + Math.floor(Math.random() * 9000));
     const r = await env.DB.prepare(`INSERT INTO pairing_codes (code, type, config, expires_at) VALUES (?, 'screen-wait', ?, ?)
       ON CONFLICT(code) DO UPDATE SET type = excluded.type, config = excluded.config, expires_at = excluded.expires_at
-      WHERE pairing_codes.expires_at < ?`).bind(code, JSON.stringify({ claim }), now() + CODE_MIN * 60000, now()).run();
+      WHERE pairing_codes.expires_at < ?`).bind(code, JSON.stringify({ claim, tv }), now() + CODE_MIN * 60000, now()).run();
     if (r.meta.changes) return json({ code, claim, expiresInMin: CODE_MIN });
   }
   return json({ error: 'busy, try again' }, 503);
@@ -46,7 +48,7 @@ export async function claim(req: Request, env: Env) {
   if (!row || row.expires_at < now()) return json({ error: 'No screen is showing that code. Open the wall on it and use the code it shows now.' }, 404);
   const c = b.config ?? {};
   const config: ScreenConfig = {
-    kind: String(c.kind ?? 'screen').slice(0, 20),
+    kind: JSON.parse(row.config).tv ? 'shared' : String(c.kind ?? 'screen').slice(0, 20),
     night: c.night === 'off' || c.night === 'on' ? c.night : 'dim',
     oled: !!c.oled,
   };

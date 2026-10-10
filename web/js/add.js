@@ -35,8 +35,15 @@ const KITS = [
     ['Hisense CanvasTV 55″ (or Samsung The Frame / TCL NXTFRAME)', 'The big statement, matte like a print. About 18 kg: never on adhesive strips.', '≈ $900–1,500', 'Hisense CanvasTV 55'],
     ['Raspberry Pi 5 (4 GB) + official case + 27 W USB-C power supply + 32 GB microSD', 'Behind the TV: it only ever shows Atlántico, and turns the TV off at night.', '≈ $90–110', 'Raspberry Pi 5 4GB starter kit'],
     ['Micro-HDMI to HDMI cable (1 m)', 'Pi to TV.', '≈ $8', 'micro HDMI to HDMI cable 1m'],
+    ['…or your own TV: just the Pi kit and cable above', 'The Pi rests on a spare HDMI input; the TV stays your TV.', '—', 'Raspberry Pi 5 4GB starter kit'],
     ['Floor easel TV stand, 43–65″, rated 35 kg+', 'Holds an art TV with no wall fixing. VIVO, ECOTINY or KONIC tripods.', '≈ $100–120', 'tripod easel TV stand 43-65 inch'],
     ['…or a floor-to-ceiling tension pole mount (Neomounts FPMA-CF200, 37–70″, 30 kg)', 'Presses between floor and ceiling: no holes. Needs a solid ceiling (not a drop ceiling).', '≈ $150–250', 'Neomounts FPMA-CF200 floor to ceiling'],
+  ] },
+  { title: 'Lights that follow the TV · optional', note: 'For the household TV: lamps beside it follow Atlántico and its surprises, and what you watch, side by side. Must be Govee lights with LAN Control (turn it on in the Govee Home app).', items: [
+    ['Govee RGBIC TV Light Bars (H6046), a pair', 'One each side of the TV: left follows the left of the picture, right the right. LAN Control.', '≈ $60–80', 'Govee H6046 TV light bars'],
+    ['Govee RGBICW Floor Lamp (H6076) or Table Lamp (H6052)', 'A corner of the room in the colours of the scene. LAN Control.', '≈ $60–110', 'Govee H6076 floor lamp'],
+    ['Raspberry Pi Camera Module 3 Wide', 'Faces the TV so the lamps follow films and series too (the Pi can\'t see inside the TV\'s own apps otherwise). Not needed for Atlántico itself.', '≈ $35', 'Raspberry Pi Camera Module 3 Wide'],
+    ['Raspberry Pi 5 camera cable, 300–500 mm', 'The Pi 5 uses the narrower connector; a longer cable lets the camera sit on a shelf facing the screen.', '≈ $5–8', 'Raspberry Pi 5 camera cable 500mm'],
   ] },
   { title: 'Colour e-ink instead (optional)', note: 'Swap the panel above for six-colour e-ink: guests who are here show in colour.', items: [
     ['Waveshare 7.3″ e-Paper (E) Spectra 6', 'The colour display.', '≈ $80', 'Waveshare 7.3 Spectra 6 e-paper'],
@@ -210,7 +217,8 @@ async function waitPaired(c) {
 // ── Screens ───────────────────────────────────────────────────────────────────
 function setupScreen() {
   const url = new URL('wall', location.href).href;
-  $('kioskcmd').textContent = `curl -fsSL ${new URL('kiosk.sh', location.href).href} | bash`;
+  $('kioskcmd').textContent = `curl -fsSL ${new URL('kiosk.sh', location.href).href} | bash -s -- art`;
+  $('kioskshared').textContent = `curl -fsSL ${new URL('kiosk.sh', location.href).href} | bash -s -- shared`;
   $('wallurl').textContent = url.replace(/^https?:\/\//, '');
   if (window.qrcode && !$('wallqr').innerHTML) {
     const qr = window.qrcode(0, 'M');

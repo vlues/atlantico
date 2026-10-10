@@ -11,6 +11,16 @@ const store = (v) => { try { v ? localStorage.setItem(KEY, JSON.stringify(v)) : 
 
 let api = '';
 let me = load();
+// The Pi on the household TV is added once from its terminal (kiosk.sh shared), which hands the
+// wall the same key it gives the TV agent: #screen=<key>&device=<id>.
+{
+  const h = new URLSearchParams(location.hash.slice(1));
+  if (h.get('screen')) {
+    me = { ...(me?.token === h.get('screen') ? me : {}), token: h.get('screen'), deviceId: h.get('device') };
+    store(me);
+    history.replaceState(null, '', location.pathname + location.search);
+  }
+}
 let lastBeat = 0;
 let lock = null;
 
@@ -86,7 +96,9 @@ const skipped = () => { try { return Number(localStorage.getItem(SKIP) ?? 0) > D
 async function offerCode() {
   let hi;
   try {
-    const r = await fetch(`${api}/api/screen/hello`, { method: 'POST' });
+    // A Pi on the household TV (kiosk.sh shared) is added as a shared TV.
+    const tv = new URLSearchParams(location.search).has('tv');
+    const r = await fetch(`${api}/api/screen/hello`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ tv }) });
     if (!r.ok) return;
     hi = await r.json();
   } catch { return; }

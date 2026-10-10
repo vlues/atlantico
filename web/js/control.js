@@ -116,8 +116,11 @@ function renderSource() {
 
 function renderScenes() {
   if (!$('zones').contains(document.activeElement)) {
+    const sideLabel = { left: 'TV: left side', right: 'TV: right side', behind: 'TV: behind it', room: 'TV: whole room', none: 'TV: doesn\'t follow' };
     $('zones').innerHTML = data.bulbs.map((b) => `<div><span class="grow">${esc(b.name)}</span>
-      <select data-zone="${esc(b.id)}">${data.zones.map((z) => `<option value="${z}" ${z === b.zone ? 'selected' : ''}>${{ wall: 'by the wall', plants: 'by the plants', sofa: 'by the sofa', none: 'elsewhere' }[z]}</option>`).join('')}</select></div>`).join('');
+      <select data-zone="${esc(b.id)}">${data.zones.map((z) => `<option value="${z}" ${z === b.zone ? 'selected' : ''}>${{ wall: 'by the wall', plants: 'by the plants', sofa: 'by the sofa', none: 'elsewhere' }[z]}</option>`).join('')}</select>
+      <select data-tvside="${esc(b.id)}" title="Follows the picture on the household TV (needs a Govee light with LAN Control)">${data.tvSides.map((s) => `<option value="${s}" ${s === b.tvSide ? 'selected' : ''}>${sideLabel[s]}</option>`).join('')}</select></div>`).join('')
+      + (data.tv ? `<p class="small muted">TV: ${{ art: 'showing Atlántico', away: 'watching TV', off: 'off', unknown: 'on' }[data.tv.screen]}${data.tv.sync ? ` · ${data.tv.lamps.length} lamp${data.tv.lamps.length === 1 ? '' : 's'} following the picture` : ''}</p>` : '');
   }
   const current = data.wall.scene;
   $('scenes').innerHTML = data.scenes.map((s) => `<button class="btn ${s.id === current ? 'on' : ''}" data-scene="${s.id}">${esc(s.label)}</button>`).join('');
@@ -125,7 +128,13 @@ function renderScenes() {
   const a = current === 'auto' ? ' · follows sunrise and sunset' : '';
   $('lightstate').textContent = l ? `${l.on ? `${l.kelvin} K · ${l.brightness}%` : 'off'} · ${data.lights.adapter}${a}` : a;
 }
-$('zones').addEventListener('change', async () => {
+$('zones').addEventListener('change', async (e) => {
+  if (e.target.dataset.tvside) {
+    const sides = Object.fromEntries([...$('zones').querySelectorAll('[data-tvside]')].map((s) => [s.dataset.tvside, s.value]));
+    try { await api('/api/lights/tvside', { method: 'PUT', owner: true, body: sides }); toast('Saved · the TV picks it up in a few seconds'); document.activeElement.blur(); refresh(); }
+    catch (err) { toast(err.message); }
+    return;
+  }
   const zones = Object.fromEntries([...$('zones').querySelectorAll('[data-zone]')].map((s) => [s.dataset.zone, s.value]));
   try { await api('/api/lights/zones', { method: 'PUT', owner: true, body: zones }); toast('Saved'); document.activeElement.blur(); refresh(); }
   catch (err) { toast(err.message); }
@@ -279,6 +288,7 @@ function renderDevices() {
         <div class="small muted">${esc(extra)} · ${d.online ? 'online' : 'offline'}${d.lastSeenS != null ? `, seen ${ago(Date.now() - d.lastSeenS * 1000)}` : ''}</div></div>
       ${d.type === 'screen' ? `<select data-night="${d.id}" title="At night (00:30–07:00)">${[['dim', 'dims at night'], ['off', 'dark at night'], ['on', 'always on']].map(([v, l]) => `<option value="${v}" ${d.config.night === v ? 'selected' : ''}>${l}</option>`).join('')}</select>
         <label class="small muted" style="display:flex;gap:6px;align-items:center"><input type="checkbox" data-oled="${d.id}" ${d.config.oled ? 'checked' : ''}> OLED care</label>` : ''}
+      ${d.config?.kind === 'shared' ? `<button class="btn small quiet" data-tvshow="${d.id}" title="Wakes the TV and switches it to Atlántico">Show on TV</button>` : ''}
       ${d.simulated && data.demo.simulate ? `<button class="btn small quiet" data-offline="${d.id}">${data.demo.offline.includes(d.id) ? 'Bring online' : 'Simulate outage'}</button>` : ''}
       ${!d.simulated && d.id !== 'govee' ? `<button class="btn small quiet" data-remove="${d.id}">Unpair</button>` : ''}
     </div>`;
@@ -294,6 +304,7 @@ $('devices').addEventListener('change', async (e) => {
 $('devices').addEventListener('click', async (e) => {
   const off = e.target.dataset.offline, rm = e.target.dataset.remove;
   if (off) act('/api/demo', { action: 'offline', value: off }, 'Updated');
+  if (e.target.dataset.tvshow) act('/api/tv/show', {}, 'The TV wakes and switches to Atlántico in a few seconds');
   if (rm && confirm('Unpair this device? It will need a new pairing code.')) {
     await api(`/api/devices/${rm}`, { method: 'DELETE', owner: true }).catch((err) => toast(err.message));
     refresh();

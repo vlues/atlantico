@@ -18,6 +18,20 @@ export interface LightAdapter {
 export const ZONES = ['wall', 'plants', 'sofa', 'none'] as const;
 export type Zone = (typeof ZONES)[number];
 
+/**
+ * Where each lamp is next to the household TV, so the Pi beside it can make the lamps follow the
+ * picture: left lamps the left of the screen, right the right, behind the middle, room the whole.
+ */
+export const TV_SIDES = ['left', 'right', 'behind', 'room', 'none'] as const;
+export type TvSide = (typeof TV_SIDES)[number];
+
+/** The TV agent (web/tv-agent.py) is driving these lamps itself, over the local network. */
+export interface TvLink { screen: 'art' | 'away' | 'off' | 'unknown'; sync: boolean; lamps: string[]; at: number }
+export async function tvLink(env: Env): Promise<TvLink | null> {
+  const s = await getSetting<TvLink | null>(env, 'tv:state', null);
+  return s && s.at > Date.now() - 90000 ? s : null;
+}
+
 export const SCENES: Record<string, { label: string; state: LightState | null }> = {
   auto: { label: 'Auto', state: null }, // follows the sun, see autoState()
   hosting: { label: 'Hosting', state: { on: true, brightness: 55, kelvin: 2400 } },
@@ -137,15 +151,25 @@ export async function applyScene(env: Env, scene: string, opts: { force?: boolea
     Math.abs(last.state.brightness - target.brightness) < 5 && Math.abs(last.state.kelvin - target.kelvin) < 150;
   if (same && !opts.force) return target;
   const { adapter, bulbs } = await adapterFor(env);
-  await push(env, adapter, bulbs.map((b) => [b, target]));
+  await push(env, adapter, withTv(bulbs.map((b) => [b, target]), await tvLink(env), scene));
   await env.STATE.put('lights:last', JSON.stringify({ scene, state: target, at: Date.now(), adapter: adapter.kind }));
   return target;
+}
+
+// While the TV drives some lamps (following the picture), the automatic scenes leave those alone,
+// and while someone is watching the other lamps settle to a low warm glow. Scenes the owner picks
+// by hand (evening, focus, off) take every lamp back; the Pi sees that and stops following.
+function withTv(targets: [Bulb, LightState][], tv: TvLink | null, scene: string): [Bulb, LightState][] {
+  if (!tv?.sync || (scene !== 'auto' && scene !== 'hosting')) return targets;
+  return targets.filter(([b]) => !tv.lamps.includes(b.id))
+    .map(([b, s]) => [b, tv.screen === 'away' && s.on ? { on: true, brightness: Math.min(s.brightness, 12), kelvin: 2200 } : s]);
 }
 
 /** Every lamp to one state for a moment, without changing the saved scene (the tour's light stop). */
 export async function glowAll(env: Env, state: LightState) {
   const { adapter, bulbs } = await adapterFor(env);
-  await push(env, adapter, bulbs.map((b) => [b, state]));
+  const tv = await tvLink(env); // lamps following the screen show a surprise where it happens instead
+  await push(env, adapter, bulbs.filter((b) => !tv?.sync || !tv.lamps.includes(b.id)).map((b) => [b, state]));
   const last = await env.STATE.get<any>('lights:last', 'json');
   await env.STATE.put('lights:last', JSON.stringify({ ...last, spot: 'all', at: Date.now() }));
 }

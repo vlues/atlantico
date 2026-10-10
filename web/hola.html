@@ -27,6 +27,7 @@
     .sky { margin: 36px -16px 0; position: relative; }
     .sky canvas { display: block; width: 100%; aspect-ratio: 1 / .62; }
     .sky figcaption { margin-top: 12px; }
+    .ontv { margin: 18px 0 0; }
     .wifi { margin: 48px auto 0; display: grid; gap: 18px; justify-items: center; }
     .qr { background: #f2f0eb; padding: 14px; width: 196px; height: 196px; }
     .qr img { display: block; }
@@ -107,6 +108,7 @@
         <canvas id="sky" aria-label="Your star in the sky of the wall piece"></canvas>
         <figcaption class="eyebrow" id="skycap">Tu estrella<span class="en">Your star</span></figcaption>
       </figure>
+      <p class="ontv" id="ontv" hidden><button class="btn quiet small" id="tvbtn" type="button">Ponlo en la tele · Show it on the TV</button></p>
       <div class="wifi" id="wifi" hidden>
         <p class="eyebrow" style="margin:0">Wi-Fi</p>
         <div class="qr" id="qr" aria-label="Código QR de la Wi-Fi"></div>
@@ -255,6 +257,16 @@
       $('line').innerHTML = '';
       $('line').append(welcomeLine(v, c, 'es', day), Object.assign(document.createElement('span'), { className: 'en', textContent: welcomeLine(v, c, 'en', day) }));
       const visitors = state?.visitors?.some((s) => s.id === v.id) ? state.visitors : [...(state?.visitors ?? []), { id: v.id, visits: v.visits, here: true, name: v.name }];
+      // The household TV: put the wall on it (it wakes and switches to Atlántico's input).
+      if (state?.tv) {
+        $('ontv').hidden = false;
+        $('tvbtn').onclick = async () => {
+          $('tvbtn').disabled = true;
+          try { await api('/api/tv/show', { method: 'POST', body: { id: v.id } }); $('tvbtn').textContent = 'En un momento · In a moment'; }
+          catch { $('tvbtn').textContent = 'Ahora no · Not right now'; }
+          setTimeout(() => { $('tvbtn').disabled = false; $('tvbtn').textContent = 'Ponlo en la tele · Show it on the TV'; }, 12000);
+        };
+      }
       const canvas = $('sky');
       $('skyfig').hidden = false;
       const ctx = canvas.getContext('2d');
